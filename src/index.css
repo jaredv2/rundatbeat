@@ -676,7 +676,7 @@ button {
 }
 
 .name-effect-wave {
-  animation: name-wave 2.2s ease-in-out infinite, name-color-pan 3.2s linear infinite;
+  animation: name-color-pan 3.2s linear infinite;
 }
 
 .name-effect-neon {
@@ -781,11 +781,9 @@ button {
   0%,
   100% {
     filter: brightness(1);
-    transform: translateY(0);
   }
   50% {
     filter: brightness(1.45);
-    transform: translateY(-1px);
   }
 }
 
@@ -802,15 +800,6 @@ button {
   }
 }
 
-@keyframes name-wave {
-  0%,
-  100% {
-    transform: skewX(0deg);
-  }
-  50% {
-    transform: skewX(-7deg) translateY(-1px);
-  }
-}
 
 @keyframes name-neon {
   0%,
