@@ -21,6 +21,54 @@ import Shop from './pages/Shop';
 import { useAuthStore } from './store/authStore';
 import { useUiStore } from './store/uiStore';
 
+// Route → title map. Dynamic routes (/battle/:id, /profile/:username) handled separately below.
+const ROUTE_TITLES = {
+  '/':            'RUNDATBEAT — HOME',
+  '/landing':     'RUNDATBEAT — WELCOME',
+  '/login':       'RUNDATBEAT — LOGIN',
+  '/setup':       'RUNDATBEAT — SETUP',
+  '/shop':        'RUNDATBEAT — THE SHOP',
+  '/cosmetics':   'RUNDATBEAT — COSMETICS',
+  '/host':        'RUNDATBEAT — HOST A BATTLE',
+  '/leaderboard': 'RUNDATBEAT — LEADERBOARD',
+  '/settings':    'RUNDATBEAT — SETTINGS',
+  '/admin':       'RUNDATBEAT — ADMIN',
+};
+
+// Called inside App so it has access to the Router context (useLocation)
+function usePageTitle() {
+  const location = useLocation();
+  useEffect(() => {
+    const path = location.pathname;
+
+    // Exact match
+    if (ROUTE_TITLES[path]) {
+      document.title = ROUTE_TITLES[path];
+      console.log('[usePageTitle] set (exact):', document.title);
+      return;
+    }
+
+    // /profile/:username — show the username in the tab
+    if (path.startsWith('/profile/')) {
+      const username = path.split('/profile/')[1]?.split('/')[0]?.toUpperCase() || '';
+      document.title = username ? `${username} — RUNDATBEAT` : 'RUNDATBEAT — PROFILE';
+      console.log('[usePageTitle] set (profile):', document.title);
+      return;
+    }
+
+    // /battle/:id — generic battle title (Battle page loads the real name async)
+    if (path.startsWith('/battle/')) {
+      document.title = 'RUNDATBEAT — BATTLE';
+      console.log('[usePageTitle] set (battle):', document.title);
+      return;
+    }
+
+    // Fallback
+    document.title = 'RUNDATBEAT';
+    console.log('[usePageTitle] set (fallback):', document.title);
+  }, [location.pathname]);
+}
+
 function MissingConfig() {
   return (
     <main className="grid min-h-screen place-items-center p-4">
@@ -53,6 +101,9 @@ export default function App() {
   const location = useLocation();
   const dailyLoginCheckedRef = useRef(false);
   const [authReady, setAuthReady] = useState(false);
+
+  // Updates document.title on every route change
+  usePageTitle();
 
   useEffect(() => {
     if (!supabase) return undefined;
