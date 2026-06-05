@@ -16,7 +16,6 @@ export default function BattlePrompt({ battle }) {
       <dl className="mt-6 grid gap-4 md:grid-cols-2">
         <div><dt className="font-mono text-xs uppercase text-rdb-muted">Restrictions</dt><dd className="text-rdb-text">{battle.restrictions}</dd></div>
         <div><dt className="font-mono text-xs uppercase text-rdb-muted">Reference Artists</dt><dd className="text-rdb-text">{battle.reference_artists?.join(', ')}</dd></div>
-        {battle.ai_instructions && <div className="md:col-span-2"><dt className="font-mono text-xs uppercase text-rdb-muted">Host AI Instructions</dt><dd className="text-rdb-text">{battle.ai_instructions}</dd></div>}
       </dl>
     </div>
   );
