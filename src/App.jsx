@@ -109,29 +109,34 @@ export default function App() {
   useRoomCleanup();
 
   useEffect(() => {
-    if (!supabase) return undefined;
+    if (!supabase) { setAuthReady(true); return undefined; }
     async function hydrate(session) {
-      setSession(session);
-      if (session?.user) {
-        const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
-        setProfile(profile);
-        if (profile) {
-          if (['/landing', '/login', '/setup'].includes(location.pathname)) {
-            navigate('/', { replace: true });
+      try {
+        setSession(session);
+        if (session?.user) {
+          const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+          setProfile(profile);
+          if (profile) {
+            if (['/landing', '/login', '/setup'].includes(location.pathname)) {
+              navigate('/', { replace: true });
+            }
+            const shouldCheckDaily = !dailyLoginCheckedRef.current && !['/landing', '/login'].includes(location.pathname);
+            dailyLoginCheckedRef.current = true;
+            const granted = shouldCheckDaily ? await grantDailyLogin(profile) : false;
+            if (granted) addToast('+3 RDB DAILY LOGIN');
+          } else if (location.pathname !== '/setup') {
+            navigate('/setup');
           }
-          const shouldCheckDaily = !dailyLoginCheckedRef.current && !['/landing', '/login'].includes(location.pathname);
-          dailyLoginCheckedRef.current = true;
-          const granted = shouldCheckDaily ? await grantDailyLogin(profile) : false;
-          if (granted) addToast('+3 RDB DAILY LOGIN');
-        } else if (location.pathname !== '/setup') {
-          navigate('/setup');
+        } else {
+          setProfile(null);
         }
-      } else {
-        setProfile(null);
+      } catch (err) {
+        console.error('[App] hydrate error:', err);
+      } finally {
+        setAuthReady(true);
       }
-      setAuthReady(true);
     }
-    supabase.auth.getSession().then(({ data }) => hydrate(data.session));
+    supabase.auth.getSession().then(({ data }) => hydrate(data.session)).catch(() => setAuthReady(true));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => hydrate(session));
     return () => listener.subscription.unsubscribe();
   }, []);

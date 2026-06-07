@@ -57,12 +57,13 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     if (!open) return;
     loadQueue();
     loadRooms();
+    checkForMatch();
     // Gentle fallback poll (15s) in case realtime misses an event
     const interval = setInterval(tryMatchmaking, 15000);
     const channel = supabase
       .channel('matchmaking-rooms')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { loadRooms(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matchmaking_queue' }, () => { loadQueue(); tryMatchmaking(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matchmaking_queue' }, () => { loadQueue(); tryMatchmaking(); checkForMatch(); })
       .subscribe();
     return () => {
       clearInterval(interval);
@@ -166,42 +167,27 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       const elo = profile.elo || 1000;
 
       // Look for ungrouped waiting players with same tier
-      const { data: candidates } = await supabase
+      const { data: sameTier } = await supabase
         .from('matchmaking_queue')
         .select('id, user_id, profiles(rank_tier)')
         .eq('mode', 'ranked')
         .eq('status', 'waiting')
         .is('group_id', null)
         .neq('user_id', profile.id)
+        .eq('profiles.rank_tier', myTier)
         .order('queued_at', { ascending: true })
         .limit(7);
 
-      const sameTier = (candidates || []).filter(
-        (c) => (c.profiles?.rank_tier || 'bronze') === myTier
-      );
+      const hasSameTier = (sameTier || []).length >= 1;
 
-      if (sameTier.length >= 1) {
-        // Found at least 1 other same-tier player — queue normally
-        // Overtime in tryMatchmaking will handle the match
-        await supabase.from('matchmaking_queue').insert({
-          user_id: profile.id, mode: 'ranked', elo,
-        });
-        await loadQueue();
-        playUiSound('queue');
-        addToast('QUEUED — MATCH STARTING SOON');
-        setQueuedAt(Date.now());
-        onQueued?.();
-      } else {
-        // No same-tier players — queue alone
-        await supabase.from('matchmaking_queue').insert({
-          user_id: profile.id, mode: 'ranked', elo,
-        });
-        await loadQueue();
-        playUiSound('queue');
-        addToast('QUEUED — WAITING FOR PLAYERS');
-        setQueuedAt(Date.now());
-        onQueued?.();
-      }
+      await supabase.from('matchmaking_queue').insert({
+        user_id: profile.id, mode: 'ranked', elo,
+      });
+      await loadQueue();
+      playUiSound('queue');
+      addToast(hasSameTier ? 'QUEUED — MATCH STARTING SOON' : 'QUEUED — WAITING FOR PLAYERS');
+      setQueuedAt(Date.now());
+      onQueued?.();
 
       setStatus('idle');
     } catch (error) {
@@ -244,20 +230,18 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     const myTier = profile.rank_tier || 'bronze';
     let groupId = null;
     try {
-      const { data: candidates } = await supabase
+      const { data: sameTier } = await supabase
         .from('matchmaking_queue')
         .select('id, user_id, queued_at, profiles(rank_tier)')
         .eq('mode', 'ranked')
         .eq('status', 'waiting')
         .is('group_id', null)
         .neq('user_id', profile.id)
+        .eq('profiles.rank_tier', myTier)
         .order('queued_at', { ascending: true })
         .limit(7);
 
-      const sameTier = (candidates || []).filter(
-        (c) => (c.profiles?.rank_tier || 'bronze') === myTier
-      );
-      if (sameTier.length < 1) return;
+      if (!sameTier || sameTier.length < 1) return;
 
       // Overtime: wait until the oldest queued player has waited OVERTIME_SECONDS
       const allQueuedAts = [myEntry, ...sameTier].map((r) => new Date(r.queued_at).getTime());
@@ -300,7 +284,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
 
       await supabase
         .from('matchmaking_queue')
-        .delete()
+        .update({ status: 'matched', battle_id: battle.id, matched_at: new Date().toISOString() })
         .in('user_id', allUserIds)
         .eq('status', 'waiting');
 
@@ -316,6 +300,24 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     }
   }
 
+  async function checkForMatch() {
+    if (!profile) return;
+    const { data } = await supabase
+      .from('matchmaking_queue')
+      .select('battle_id')
+      .eq('user_id', profile.id)
+      .eq('status', 'matched')
+      .not('battle_id', 'is', null)
+      .order('matched_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data?.battle_id) {
+      supabase.from('matchmaking_queue').delete().eq('user_id', profile.id).eq('status', 'matched').then(() => {});
+      onClose();
+      navigate(`/battle/${data.battle_id}`);
+    }
+  }
+
   async function createAiBattleRoom({ mode, ownerId, members, queueId = null, roomName, setup = null, difficultyOverride = null }) {
     const isRanked = mode === 'ranked';
     const normalizedSetup = setup ? normalizeRoomSetup(setup) : null;
@@ -325,7 +327,8 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       : ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)]);
     const genre = await selectGenre(supabase, difficulty);
     const restrictions = pickRestrictions(difficulty, genre, 3);
-    const genreDirective = `Generate a ${genre} beat battle prompt for a${mode === 'solo' ? ' solo practice session' : 'n automatically matched room'}. The genre must be ${genre}. Make the title match the genre and end with TYPE BEAT. Only generate the title, mood, flavor_text, and reference_keywords. Do NOT generate restrictions.${normalizedSetup?.aiInstructions ? ` Host custom instructions: ${normalizedSetup.aiInstructions}.` : ''}`;
+    const customInstr = normalizedSetup?.aiInstructions?.trim();
+    const genreDirective = `${customInstr ? `Follow the host's instructions: ${customInstr}. ` : ''}Generate a ${genre} beat battle prompt for a${mode === 'solo' ? ' solo practice session' : ' quick room battle'}. The genre must be ${genre}. Make the title match the genre and end with TYPE BEAT. Only generate the title, mood, flavor_text, and reference_keywords. Do NOT generate restrictions.`;
     const recentGenres = (() => { try { return JSON.parse(localStorage.getItem('rdb_recent_genres') || '[]'); } catch { return []; } })();
     const { json } = await generateBattlePrompt({ directive: genreDirective, mode, recentGenres, difficulty });
     const validation = validatePrompt(json);
@@ -447,12 +450,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     try {
       const s = roomSetup;
       const parts = ['Generate a solo producer beat battle prompt for a practice session.', 'Pick a current competitive beat lane and make the title match that lane.', 'The title must end with TYPE BEAT.', 'Make the restrictions fair, audible in the final beat, and easy for voters to judge.'];
-      if (s.soloMood) parts.push(`Mood: ${s.soloMood}.`);
-      if (s.soloFeeling) parts.push(`Feeling/vibe: ${s.soloFeeling}.`);
-      if (s.soloType) parts.push(`Beat type: ${s.soloType}.`);
-      if (s.soloGenre) parts.push(`Genre: ${s.soloGenre}.`);
-      if (s.soloBpm) parts.push(`BPM: ${s.soloBpm}.`);
-      if (s.soloRestriction) parts.push(`Restriction: ${s.soloRestriction}.`);
+      if (s.aiInstructions?.trim()) parts.push(`Host instructions: ${s.aiInstructions.trim()}.`);
       const soloDirective = parts.join(' ');
       const setup = { ...s, aiInstructions: soloDirective };
       const { battle } = await createAiBattleRoom({
@@ -562,7 +560,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
                   <div className="text-sm font-semibold text-rdb-text">Ranked Queue</div>
                   <div className="mt-1 text-xs uppercase text-rdb-muted">{tier} tier • skill-based matching</div>
                 </div>
-                <div className="rounded-lg bg-white/10 px-3 py-1 font-mono text-[11px] uppercase text-rdb-muted">{formatNumber(queueRows.filter(r => r.mode === 'ranked' && r.status === 'waiting').length)} searching</div>
+                <div className="rounded-lg bg-white/10 px-3 py-1 font-mono text-[11px] uppercase text-rdb-muted">{formatNumber(sameTierWaiting.length)} searching</div>
               </div>
               {ownQueuedRow ? (
                 <div className="mt-4 flex flex-col items-center gap-3 py-6">

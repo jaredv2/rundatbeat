@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useFriends } from '../../hooks/useFriends';
+import { generateBattlePrompt, GENRE_KNOWLEDGE } from '../../lib/groq';
+import { pickRestrictions, selectGenre } from '../../lib/restrictions';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useFriendStore } from '../../store/friendStore';
@@ -20,6 +22,9 @@ export default function FriendsDock() {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState('friends');
   const [body, setBody] = useState('');
+  const [challenges, setChallenges] = useState([]);
+
+  const navigate = useNavigate();
 
   useFriends();
 
@@ -27,10 +32,41 @@ export default function FriendsDock() {
   const messages = useMemo(() => messagesByFriend[selectedFriendId] || [], [messagesByFriend, selectedFriendId]);
   const totalUnread = useMemo(() => Object.values(unreadByFriend).reduce((a, b) => a + b, 0), [unreadByFriend]);
 
+  const pendingChallenge = useMemo(() => {
+    if (!selectedFriendId || !challenges.length) return null;
+    return challenges.find(
+      (c) => c.status === 'pending' &&
+        ((c.challenger_id === profile.id && c.challengee_id === selectedFriendId) ||
+         (c.challengee_id === profile.id && c.challenger_id === selectedFriendId))
+    );
+  }, [challenges, selectedFriendId, profile?.id]);
+
   useEffect(() => {
     if (!selectedFriendId) return;
     loadMessages(selectedFriendId);
   }, [selectedFriendId]);
+
+  useEffect(() => {
+    if (!profile) return;
+    loadChallenges();
+    const ch = supabase
+      .channel('challenges-' + profile.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'challenges', filter: `challenger_id=eq.${profile.id}` }, () => loadChallenges())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'challenges', filter: `challengee_id=eq.${profile.id}` }, () => loadChallenges())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [profile?.id]);
+
+  useEffect(() => {
+    const acc = challenges.find(
+      (c) => c.status === 'accepted' && c.battle_id &&
+        (c.challenger_id === profile?.id || c.challengee_id === profile?.id)
+    );
+    if (acc) {
+      setOpen(false);
+      navigate(`/battle/${acc.battle_id}`);
+    }
+  }, [challenges, profile?.id]);
 
   if (!profile) return null;
 
@@ -127,6 +163,106 @@ export default function FriendsDock() {
     } else addToast(error.message, 'error');
   }
 
+  async function loadChallenges() {
+    if (!profile) return;
+    const { data } = await supabase
+      .from('challenges')
+      .select('*')
+      .or(`challenger_id.eq.${profile.id},challengee_id.eq.${profile.id}`)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    setChallenges(data || []);
+  }
+
+  async function sendChallenge(friendId) {
+    playUiSound('click');
+    try {
+      const { error } = await supabase.from('challenges').insert({
+        challenger_id: profile.id, challengee_id: friendId, status: 'pending',
+      });
+      if (error) throw error;
+      addToast('CHALLENGE SENT');
+      loadChallenges();
+    } catch (err) {
+      addToast(err.message || 'CHALLENGE FAILED', 'error');
+    }
+  }
+
+  async function declineChallenge(challengeId) {
+    playUiSound('cancel');
+    try {
+      const { error } = await supabase.from('challenges').update({ status: 'declined' }).eq('id', challengeId);
+      if (error) throw error;
+      addToast('CHALLENGE DECLINED');
+      loadChallenges();
+    } catch (err) {
+      addToast(err.message || 'DECLINE FAILED', 'error');
+    }
+  }
+
+  async function acceptChallenge(challengeId) {
+    playUiSound('success');
+    try {
+      const challenge = challenges.find((c) => c.id === challengeId);
+      if (!challenge) return;
+      const otherId = challenge.challenger_id === profile.id ? challenge.challengee_id : challenge.challenger_id;
+      const { error } = await supabase.from('challenges').update({ status: 'accepted' }).eq('id', challengeId).eq('status', 'pending');
+      if (error) throw error;
+      addToast('CHALLENGE ACCEPTED — CREATING ROOM');
+      await createChallengeBattle(challengeId, profile.id, otherId);
+    } catch (err) {
+      addToast(err.message || 'ACCEPT FAILED', 'error');
+      loadChallenges();
+    }
+  }
+
+  async function createChallengeBattle(challengeId, userId1, userId2) {
+    try {
+      const diff = ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)];
+      const genre = await selectGenre(supabase, diff);
+      const restrictions = pickRestrictions(diff, genre, 3);
+      const directive = `Generate a ${genre} beat battle prompt for a 1v1 challenge match. The genre must be ${genre}. Make the title end with TYPE BEAT. Only generate the title, mood, flavor_text, and reference_keywords. Do NOT generate restrictions.`;
+      const { json } = await generateBattlePrompt({ directive, mode: 'quick', recentGenres: [], difficulty: diff });
+      if (!json || !json.title) throw new Error('Prompt generation failed');
+
+      const g = GENRE_KNOWLEDGE[genre];
+      const bpm = g ? Math.floor((g.bpm_range[0] + g.bpm_range[1]) / 2) : 140;
+
+      const { data: battle, error: battleError } = await supabase.from('battles').insert({
+        title: json.title, prompt_text: json.flavor_text, genre, bpm,
+        mood: json.mood, restrictions: restrictions.join('; '),
+        reference_artists: Array.isArray(json.reference_keywords) ? json.reference_keywords : [],
+        flavor_text: json.flavor_text, duration_minutes: 45, song_length_seconds: 60,
+        mode: 'quick', status: 'upcoming',
+        starts_at: new Date(Date.now()).toISOString(),
+        voting_ends_at: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
+        created_by: userId1,
+      }).select('id').single();
+      if (battleError) throw battleError;
+
+      const { data: room, error: roomError } = await supabase.from('rooms').insert({
+        name: '1V1 CHALLENGE', owner_id: userId1, battle_id: battle.id,
+        status: 'locked', max_players: 2, current_players: 2, mode: 'quick',
+        is_public: false, song_length_seconds: 60, voting_minutes: 3,
+      }).select('*').single();
+      if (roomError) throw roomError;
+
+      const { error: membersErr } = await supabase.from('room_members').upsert([
+        { room_id: room.id, user_id: userId1, role: 'owner' },
+        { room_id: room.id, user_id: userId2, role: 'member' },
+      ]);
+      if (membersErr) throw membersErr;
+
+      await supabase.from('challenges').update({ battle_id: battle.id }).eq('id', challengeId);
+
+      setOpen(false);
+      navigate(`/battle/${battle.id}`);
+    } catch (err) {
+      await supabase.from('challenges').update({ status: 'declined' }).eq('id', challengeId);
+      throw err;
+    }
+  }
+
   function isOnline(userId) {
     const ts = presence[userId];
     if (!ts) return false;
@@ -160,7 +296,7 @@ export default function FriendsDock() {
                 return (
                   <div className={`group mb-2 flex items-start gap-2 font-mono text-[11px] uppercase ${isMine ? 'justify-end' : ''}`} key={msg.id}>
                     <span className={`rounded px-2 py-1 ${isMine ? 'bg-rdb-orange/20 text-rdb-text' : 'bg-rdb-surface text-rdb-muted'}`}>
-                      <span className={isMine ? '' : 'text-rdb-text'}>{selectedFriend.username}:</span> {msg.body}
+                      <span className={isMine ? '' : 'text-rdb-text'}>{isMine ? 'You' : selectedFriend.username}:</span> {msg.body}
                     </span>
                     {isMine && (
                       <button
@@ -177,6 +313,26 @@ export default function FriendsDock() {
               {!messages.length && <div className="font-mono text-[11px] uppercase text-rdb-muted p-2">No messages yet.</div>}
             </div>
 
+            {pendingChallenge && (
+              <div className="mt-3 rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-3">
+                <div className="font-mono text-[11px] uppercase text-rdb-text">
+                  {pendingChallenge.challenger_id === profile?.id
+                    ? 'Challenge sent — waiting for response'
+                    : `${selectedFriend.username} challenged you!`}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  {pendingChallenge.challenger_id !== profile?.id && (
+                    <>
+                      <button className="rdb-button text-[10px] border-green-600 text-green-400" type="button" onClick={() => acceptChallenge(pendingChallenge.id)}>ACCEPT</button>
+                      <button className="rdb-button text-[10px] border-rdb-red text-rdb-red" type="button" onClick={() => declineChallenge(pendingChallenge.id)}>DECLINE</button>
+                    </>
+                  )}
+                  {pendingChallenge.challenger_id === profile?.id && (
+                    <button className="rdb-button text-[10px]" type="button" onClick={() => declineChallenge(pendingChallenge.id)}>CANCEL</button>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="mt-3 flex gap-2">
               <input className="rdb-input" disabled={!selectedFriendId} maxLength={500} placeholder="Message" value={body} onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }} />
               <button className="rdb-button rdb-button-primary" disabled={!selectedFriendId} type="button" onClick={sendMessage}>SEND</button>
@@ -200,6 +356,10 @@ export default function FriendsDock() {
 
             {view === 'requests' ? (
               <div className="mt-3 grid gap-3 max-h-[300px] overflow-y-auto">
+                <div className="flex items-center justify-between pb-1">
+                  <button className="font-mono text-[10px] uppercase text-rdb-muted hover:text-rdb-orange" type="button" onClick={() => { playUiSound('click'); setView('friends'); }}>← BACK</button>
+                  <span className="font-mono text-[10px] uppercase text-rdb-muted">Requests</span>
+                </div>
                 {incomingRequests.length > 0 && (
                   <div>
                     <div className="mb-2 font-mono text-[10px] uppercase text-rdb-muted">Incoming</div>
@@ -259,6 +419,7 @@ export default function FriendsDock() {
                         {unread > 0 && (
                           <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rdb-orange px-1 font-mono text-[9px] text-black">{unread > 9 ? '9+' : unread}</span>
                         )}
+                        <button className="font-mono text-[9px] uppercase text-rdb-orange hover:text-orange-300" type="button" onClick={(e) => { e.stopPropagation(); sendChallenge(friend.id); }}>1V1 ME</button>
                         <Link className="font-mono text-[9px] uppercase text-rdb-muted hover:text-rdb-orange" to={`/profile/${friend.username}`} onClick={(e) => e.stopPropagation()}>VIEW</Link>
                       </div>
                     </button>
