@@ -63,7 +63,14 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     const channel = supabase
       .channel('matchmaking-rooms')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { loadRooms(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'matchmaking_queue' }, () => { loadQueue(); tryMatchmaking(); checkForMatch(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matchmaking_queue' }, (payload) => {
+        loadQueue(); tryMatchmaking(); checkForMatch();
+        if (payload.eventType === 'UPDATE' && payload.new?.user_id === profile?.id && payload.new?.status === 'matched' && payload.new?.battle_id) {
+          supabase.from('matchmaking_queue').delete().eq('id', payload.new.id).then(() => {});
+          onClose();
+          navigate(`/battle/${payload.new.battle_id}`);
+        }
+      })
       .subscribe();
     return () => {
       clearInterval(interval);

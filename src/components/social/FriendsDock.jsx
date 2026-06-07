@@ -41,6 +41,17 @@ export default function FriendsDock() {
     );
   }, [challenges, selectedFriendId, profile?.id]);
 
+  const incomingChallengeByFriend = useMemo(() => {
+    if (!challenges.length || !profile) return {};
+    const map = {};
+    for (const c of challenges) {
+      if (c.status === 'pending' && c.challengee_id === profile.id) {
+        map[c.challenger_id] = c;
+      }
+    }
+    return map;
+  }, [challenges, profile?.id]);
+
   useEffect(() => {
     if (!selectedFriendId) return;
     loadMessages(selectedFriendId);
@@ -419,7 +430,17 @@ export default function FriendsDock() {
                         {unread > 0 && (
                           <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rdb-orange px-1 font-mono text-[9px] text-black">{unread > 9 ? '9+' : unread}</span>
                         )}
-                        <button className="font-mono text-[9px] uppercase text-rdb-orange hover:text-orange-300" type="button" onClick={(e) => { e.stopPropagation(); sendChallenge(friend.id); }}>1V1 ME</button>
+                        {(() => {
+                          const inc = incomingChallengeByFriend[friend.id];
+                          return inc ? (
+                            <div className="flex gap-1">
+                              <button className="font-mono text-[9px] uppercase text-green-400 hover:text-green-300" type="button" onClick={(e) => { e.stopPropagation(); acceptChallenge(inc.id); }}>ACCEPT</button>
+                              <button className="font-mono text-[9px] uppercase text-rdb-red hover:text-red-300" type="button" onClick={(e) => { e.stopPropagation(); declineChallenge(inc.id); }}>DECLINE</button>
+                            </div>
+                          ) : (
+                            <button className="font-mono text-[9px] uppercase text-rdb-orange hover:text-orange-300" type="button" onClick={(e) => { e.stopPropagation(); sendChallenge(friend.id); }}>1V1 ME</button>
+                          );
+                        })()}
                         <Link className="font-mono text-[9px] uppercase text-rdb-muted hover:text-rdb-orange" to={`/profile/${friend.username}`} onClick={(e) => e.stopPropagation()}>VIEW</Link>
                       </div>
                     </button>
