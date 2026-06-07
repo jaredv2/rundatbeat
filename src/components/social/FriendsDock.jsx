@@ -23,6 +23,7 @@ export default function FriendsDock() {
   const [view, setView] = useState('friends');
   const [body, setBody] = useState('');
   const [challenges, setChallenges] = useState([]);
+  const [activeGame, setActiveGame] = useState(false);
 
   const navigate = useNavigate();
 
@@ -78,6 +79,17 @@ export default function FriendsDock() {
       navigate(`/battle/${acc.battle_id}`);
     }
   }, [challenges, profile?.id]);
+
+  useEffect(() => {
+    if (!profile) return;
+    checkActiveGame();
+    const ch = supabase
+      .channel('active-game-' + profile.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members', filter: `user_id=eq.${profile.id}` }, () => checkActiveGame())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matchmaking_queue', filter: `user_id=eq.${profile.id}` }, () => checkActiveGame())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [profile?.id]);
 
   if (!profile) return null;
 
@@ -172,6 +184,16 @@ export default function FriendsDock() {
       removeFriend(friendId);
       addToast('USER BLOCKED');
     } else addToast(error.message, 'error');
+  }
+
+  async function checkActiveGame() {
+    if (!profile) return;
+    const [{ data: members }, { data: queue }] = await Promise.all([
+      supabase.from('room_members').select('room:room_id(status)').eq('user_id', profile.id),
+      supabase.from('matchmaking_queue').select('id').eq('user_id', profile.id).in('status', ['waiting', 'matched']).limit(1),
+    ]);
+    const inRoom = (members || []).some((m) => m.room?.status && m.room.status !== 'closed');
+    setActiveGame(inRoom || (queue && queue.length > 0));
   }
 
   async function loadChallenges() {
@@ -430,7 +452,9 @@ export default function FriendsDock() {
                         {unread > 0 && (
                           <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rdb-orange px-1 font-mono text-[9px] text-black">{unread > 9 ? '9+' : unread}</span>
                         )}
-                        {(() => {
+                        {activeGame ? (
+                          <span className="font-mono text-[8px] uppercase text-rdb-muted">IN GAME</span>
+                        ) : (() => {
                           const inc = incomingChallengeByFriend[friend.id];
                           return inc ? (
                             <div className="flex gap-1">

@@ -8,8 +8,6 @@ import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
 
-const OVERTIME_SECONDS = 20;
-
 const DEFAULT_ROOM_SETUP = {
   name: 'PRIVATE STUDIO',
   battleStartSeconds: 60,
@@ -42,24 +40,13 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     () => waitingRows.filter((r) => (r.profiles?.rank_tier || 'bronze') === tier),
     [waitingRows, tier],
   );
-  const overtimeEarliest = useMemo(() => {
-    if (sameTierWaiting.length < 2) return null;
-    return sameTierWaiting.reduce((a, b) => (new Date(a.queued_at) < new Date(b.queued_at) ? a : b));
-  }, [sameTierWaiting]);
-  const overtimeRemaining = useMemo(() => {
-    if (!overtimeEarliest) return 0;
-    const elapsed = Date.now() - new Date(overtimeEarliest.queued_at).getTime();
-    return Math.max(0, OVERTIME_SECONDS * 1000 - elapsed);
-  }, [overtimeEarliest]);
-  const isOvertime = overtimeRemaining > 0;
 
   useEffect(() => {
     if (!open) return;
     loadQueue();
     loadRooms();
     checkForMatch();
-    // Gentle fallback poll (15s) in case realtime misses an event
-    const interval = setInterval(tryMatchmaking, 15000);
+    const interval = setInterval(tryMatchmaking, 5000);
     const channel = supabase
       .channel('matchmaking-rooms')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { loadRooms(); })
@@ -85,13 +72,6 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       }
     };
   }, [open]);
-
-  // Faster polling during overtime to catch match start as soon as it's ready
-  useEffect(() => {
-    if (!open || !isOvertime) return;
-    const fast = setInterval(tryMatchmaking, 3000);
-    return () => clearInterval(fast);
-  }, [open, isOvertime]);
 
   // ── Tiny isolated component for elapsed timer ─────────────────────────────
   function ElapsedTimer({ queuedAt: from }) {
@@ -158,41 +138,14 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
         }
       }
 
-      // Check queue isn't full (max 8)
-      const { count: queueCount } = await supabase
-        .from('matchmaking_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('mode', 'ranked')
-        .eq('status', 'waiting')
-        .is('group_id', null);
-      if ((queueCount || 0) >= 8) {
-        addToast('RANKED QUEUE FULL — TRY AGAIN LATER', 'error');
-        setStatus('idle'); return;
-      }
-
-      const myTier = profile.rank_tier || 'bronze';
       const elo = profile.elo || 1000;
-
-      // Look for ungrouped waiting players with same tier
-      const { data: sameTier } = await supabase
-        .from('matchmaking_queue')
-        .select('id, user_id, profiles(rank_tier)')
-        .eq('mode', 'ranked')
-        .eq('status', 'waiting')
-        .is('group_id', null)
-        .neq('user_id', profile.id)
-        .eq('profiles.rank_tier', myTier)
-        .order('queued_at', { ascending: true })
-        .limit(7);
-
-      const hasSameTier = (sameTier || []).length >= 1;
 
       await supabase.from('matchmaking_queue').insert({
         user_id: profile.id, mode: 'ranked', elo,
       });
       await loadQueue();
       playUiSound('queue');
-      addToast(hasSameTier ? 'QUEUED — MATCH STARTING SOON' : 'QUEUED — WAITING FOR PLAYERS');
+      addToast('QUEUED');
       setQueuedAt(Date.now());
       onQueued?.();
 
@@ -237,7 +190,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     const myTier = profile.rank_tier || 'bronze';
     let groupId = null;
     try {
-      const { data: sameTier } = await supabase
+      const { data: candidates } = await supabase
         .from('matchmaking_queue')
         .select('id, user_id, queued_at, profiles(rank_tier)')
         .eq('mode', 'ranked')
@@ -245,19 +198,31 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
         .is('group_id', null)
         .neq('user_id', profile.id)
         .eq('profiles.rank_tier', myTier)
-        .order('queued_at', { ascending: true })
-        .limit(7);
+        .order('queued_at', { ascending: true });
 
-      if (!sameTier || sameTier.length < 1) return;
+      const all = [myEntry, ...(candidates || [])];
+      if (all.length < 2) return;
 
-      // Overtime: wait until the oldest queued player has waited OVERTIME_SECONDS
-      const allQueuedAts = [myEntry, ...sameTier].map((r) => new Date(r.queued_at).getTime());
-      const oldest = Math.min(...allQueuedAts);
-      if (Date.now() - oldest < OVERTIME_SECONDS * 1000) return;
+      // Partition all same-tier players into groups of min 2
+      const groups = [];
+      for (let i = 0; i < all.length;) {
+        const remaining = all.length - i;
+        if (remaining >= 3 && remaining % 2 === 1) {
+          groups.push(all.slice(i, i + 3));
+          i += 3;
+        } else {
+          const size = Math.min(2, remaining);
+          groups.push(all.slice(i, i + size));
+          i += size;
+        }
+      }
+
+      const myGroup = groups.find((g) => g.some((p) => p.user_id === profile.id));
+      if (!myGroup || myGroup.length < 2) return;
 
       setStatus('busy');
       groupId = crypto.randomUUID();
-      const ids = sameTier.map((m) => m.id);
+      const ids = myGroup.map((m) => m.id);
 
       const { error: claimErr } = await supabase
         .from('matchmaking_queue')
@@ -266,22 +231,17 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
         .is('group_id', null);
       if (claimErr) throw claimErr;
 
-      await supabase
-        .from('matchmaking_queue')
-        .update({ group_id: groupId })
-        .eq('id', myEntry.id);
-
       const { count } = await supabase
         .from('matchmaking_queue')
         .select('id', { count: 'exact', head: true })
         .eq('group_id', groupId);
-      if (count < sameTier.length + 1) {
+      if (count < ids.length) {
         await supabase.from('matchmaking_queue').update({ group_id: null }).eq('group_id', groupId);
         setStatus('idle');
         return;
       }
 
-      const allUserIds = [...sameTier.map((m) => m.user_id), profile.id];
+      const allUserIds = myGroup.map((m) => m.user_id);
 
       const { battle } = await createAiBattleRoom({
         mode: 'ranked',
@@ -571,15 +531,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
               </div>
               {ownQueuedRow ? (
                 <div className="mt-4 flex flex-col items-center gap-3 py-6">
-                  {isOvertime ? (
-                    <>
-                      <div className="font-mono text-[11px] uppercase text-rdb-orange">Overtime — {Math.ceil(overtimeRemaining / 1000)}s</div>
-                      <div className="font-mono text-[10px] uppercase text-rdb-muted">Waiting for more players</div>
-                      <div className="mt-1 h-1 w-full max-w-[200px] overflow-hidden rounded-full bg-white/10">
-                        <div className="h-full animate-pulse rounded-full bg-rdb-orange" style={{ width: `${(1 - overtimeRemaining / (OVERTIME_SECONDS * 1000)) * 100}%` }} />
-                      </div>
-                    </>
-                  ) : sameTierWaiting.length >= 2 ? (
+                  {status === 'busy' ? (
                     <>
                       <div className="font-mono text-[11px] uppercase text-green-400">Match found!</div>
                       <div className="font-mono text-[10px] uppercase text-rdb-muted">Starting match...</div>
