@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
+import { playUiSound } from '../../lib/sfx';
 
 export default function SocialHub({ producers = [] }) {
   const { profile } = useAuthStore();
@@ -61,6 +62,7 @@ export default function SocialHub({ producers = [] }) {
   }
 
   async function createRoom() {
+    playUiSound('click');
     if (!profile || !roomName.trim()) return;
     try {
       const { data, error } = await supabase.from('rooms').insert({ name: roomName.trim().toUpperCase(), owner_id: profile.id, max_players: 4, current_players: 1 }).select('*').single();
@@ -75,6 +77,7 @@ export default function SocialHub({ producers = [] }) {
   }
 
   async function joinRoom(room) {
+    playUiSound('click');
     if (!profile) return;
     try {
       await supabase.from('room_members').upsert({ room_id: room.id, user_id: profile.id, role: room.owner_id === profile.id ? 'owner' : 'member' });
@@ -88,6 +91,7 @@ export default function SocialHub({ producers = [] }) {
   }
 
   async function closeRoom(room) {
+    playUiSound('click');
     if (!profile || room.owner_id !== profile.id) return;
     try {
       const { error } = await supabase.from('rooms').update({ status: room.status === 'locked' ? 'open' : 'locked' }).eq('id', room.id);
@@ -99,6 +103,7 @@ export default function SocialHub({ producers = [] }) {
   }
 
   async function removeRoom(room) {
+    playUiSound('cancel');
     if (!profile || room.owner_id !== profile.id) return;
     try {
       const { error } = await supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
@@ -122,6 +127,7 @@ export default function SocialHub({ producers = [] }) {
   }
 
   async function sendRoomMessage() {
+    playUiSound('click');
     if (!profile || !selectedRoom || !roomBody.trim()) return;
     const body = roomBody.trim();
     setRoomBody('');
@@ -151,6 +157,7 @@ export default function SocialHub({ producers = [] }) {
   }
 
   async function sendFriendMessage() {
+    playUiSound('click');
     if (!profile || !friend || !friendBody.trim()) return;
     const body = friendBody.trim();
     setFriendBody('');
@@ -206,7 +213,7 @@ export default function SocialHub({ producers = [] }) {
         <h2 className="rdb-section-title">FRIENDS</h2>
         <div className="grid gap-2">
           {friends.map((user) => (
-            <button className={`flex h-9 items-center gap-2 border px-2 text-left font-mono text-[11px] uppercase ${friend?.id === user.id ? 'border-rdb-orange text-rdb-orange' : 'border-rdb-border text-rdb-text'}`} key={user.id} type="button" onClick={() => setFriend(user)}>
+            <button className={`flex h-9 items-center gap-2 border px-2 text-left font-mono text-[11px] uppercase ${friend?.id === user.id ? 'border-rdb-orange text-rdb-orange' : 'border-rdb-border text-rdb-text'}`} key={user.id} type="button" onClick={() => { playUiSound('click'); setFriend(user); }}>
               {user.avatar_url && <img className="h-5 w-5 border border-rdb-border" src={user.avatar_url} alt="" />}
               <span>{user.username}</span>
             </button>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Check, ShoppingBag } from 'lucide-react';
+import { playUiSound } from '../../lib/sfx';
 import { getNameCosmeticClassName, getNameGradientStyle, getNameplateEmoji, slugCosmeticName } from '../../lib/display';
 import ConfirmModal from '../ui/ConfirmModal';
 
@@ -55,7 +56,7 @@ export default function PurchaseModal({ item, open, closedBattles = [], onCancel
       {['custom_badge', 'profile_badge', 'username_change'].includes(item.item_type) && <input className="rdb-input mt-4" maxLength={['custom_badge', 'profile_badge'].includes(item.item_type) ? 12 : 20} placeholder={label} value={value} onChange={(e) => setValue(e.target.value)} />}
       {item.item_type === 'nameplate_icon' && (
         <div className="mt-4 grid grid-cols-4 gap-2">
-          {ICONS.map((nextIcon) => <button key={nextIcon} className={`border p-2 font-mono text-[11px] ${icon === nextIcon ? 'border-rdb-orange text-rdb-orange' : 'border-rdb-border text-rdb-muted'}`} type="button" onClick={() => setIcon(nextIcon)}>{getNameplateEmoji(nextIcon)} {nextIcon}</button>)}
+          {ICONS.map((nextIcon) => <button key={nextIcon} className={`border p-2 font-mono text-[11px] ${icon === nextIcon ? 'border-rdb-orange text-rdb-orange' : 'border-rdb-border text-rdb-muted'}`} type="button" onClick={() => { playUiSound('click'); setIcon(nextIcon); }}>{getNameplateEmoji(nextIcon)} {nextIcon}</button>)}
         </div>
       )}
       {['name_effect', 'name_color'].includes(item.item_type) && (

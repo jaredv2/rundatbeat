@@ -4,6 +4,7 @@ import Footer from './components/layout/Footer';
 import Navbar from './components/layout/Navbar';
 import FriendsDock from './components/social/FriendsDock';
 import ToastNotification from './components/ui/ToastNotification';
+import { useRoomCleanup } from './hooks/useRoomCleanup';
 import { grantDailyLogin } from './lib/tokenHelpers';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import Admin from './pages/Admin';
@@ -20,6 +21,7 @@ import Settings from './pages/Settings';
 import Shop from './pages/Shop';
 import { useAuthStore } from './store/authStore';
 import { useUiStore } from './store/uiStore';
+import { playUiSound } from './lib/sfx';
 
 // Route → title map. Dynamic routes (/battle/:id, /profile/:username) handled separately below.
 const ROUTE_TITLES = {
@@ -88,7 +90,7 @@ function BannedAccount({ profile, onLogout }) {
         <h1 className="font-mono text-2xl uppercase text-rdb-red">Account banned</h1>
         <p className="mt-3 font-mono text-[12px] uppercase text-rdb-muted">Access is disabled {until}.</p>
         {profile?.ban_reason && <p className="mt-2 text-sm text-rdb-muted">{profile.ban_reason}</p>}
-        <button className="rdb-button mt-5" type="button" onClick={onLogout}>Logout</button>
+        <button className="rdb-button mt-5" type="button" onClick={() => { playUiSound('cancel'); onLogout(); }}>Logout</button>
       </div>
     </main>
   );
@@ -104,6 +106,7 @@ export default function App() {
 
   // Updates document.title on every route change
   usePageTitle();
+  useRoomCleanup();
 
   useEffect(() => {
     if (!supabase) return undefined;
@@ -140,11 +143,31 @@ export default function App() {
         user_id: profile.id,
         last_seen_at: new Date().toISOString(),
       });
+      const since = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const { count } = await supabase
+        .from('user_presence')
+        .select('user_id', { count: 'exact', head: true })
+        .gte('last_seen_at', since);
+      if (count > 0) {
+        const { data: peak } = await supabase
+          .from('site_stats')
+          .select('value')
+          .eq('metric', 'peak_online')
+          .maybeSingle();
+        if (!peak || count > peak.value) {
+          await supabase.from('site_stats').upsert({ metric: 'peak_online', value: count, updated_at: new Date().toISOString() });
+        }
+      }
     }
     ping();
     const timer = window.setInterval(ping, 45000);
     return () => window.clearInterval(timer);
   }, [profile?.id]);
+
+  useEffect(() => {
+    if (!supabase || !profile?.id) return;
+    supabase.rpc('increment_counter', { metric_name: 'page_visits' });
+  }, [location.pathname, profile?.id]);
 
   if (!isSupabaseConfigured) return <MissingConfig />;
   if (!authReady) return <main className="grid min-h-screen place-items-center font-mono text-rdb-orange">LOADING...</main>;

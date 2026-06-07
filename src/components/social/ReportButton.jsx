@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
+import { playUiSound } from '../../lib/sfx';
 
 export default function ReportButton({ reportedUserId, battleId }) {
   const { profile } = useAuthStore();
@@ -13,6 +14,7 @@ export default function ReportButton({ reportedUserId, battleId }) {
   if (!profile || profile.id === reportedUserId) return null;
 
   async function submit() {
+    playUiSound('click');
     try {
       const { error } = await supabase.from('reports').insert({
         reporter_id: profile.id,
@@ -32,7 +34,7 @@ export default function ReportButton({ reportedUserId, battleId }) {
 
   return (
     <div className="relative">
-      <button className="rdb-button" type="button" onClick={() => setOpen(!open)}>REPORT</button>
+      <button className="rdb-button" type="button" onClick={() => { playUiSound('click'); setOpen(!open); }}>REPORT</button>
       {open && (
         <div className="absolute right-0 top-9 z-20 w-[260px] border border-rdb-border bg-rdb-bg p-3 text-left">
           <label className="grid gap-2 font-mono text-[11px] uppercase text-rdb-muted">
@@ -47,7 +49,7 @@ export default function ReportButton({ reportedUserId, battleId }) {
           <textarea className="rdb-input mt-3 min-h-20" placeholder="DETAILS" value={details} onChange={(event) => setDetails(event.target.value)} />
           <div className="mt-3 flex gap-2">
             <button className="rdb-button border-rdb-orange text-rdb-orange" type="button" onClick={submit}>SEND</button>
-            <button className="rdb-button" type="button" onClick={() => setOpen(false)}>CANCEL</button>
+            <button className="rdb-button" type="button" onClick={() => { playUiSound('cancel'); setOpen(false); }}>CANCEL</button>
           </div>
         </div>
       )}

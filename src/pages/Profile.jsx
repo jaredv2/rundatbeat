@@ -10,6 +10,7 @@ import { formatNumber, getNameCosmeticClassName, getNameGradientStyle, getNamepl
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
+import { playUiSound } from '../lib/sfx';
 
 export default function Profile() {
   const { username } = useParams();
@@ -92,7 +93,8 @@ export default function Profile() {
                   {profile.nameplate_icon && <span className="mr-2 text-3xl text-rdb-orange">{getNameplateEmoji(profile.nameplate_icon)}</span>}
                   {profile.username}
                 </h1>
-                <div className="mt-2 flex items-center justify-center gap-1 font-mono text-[11px] uppercase text-rdb-muted sm:justify-start"><Calendar size={12} />JOINED {joined}</div>
+                <button className="mt-1 block truncate font-mono text-[10px] uppercase text-rdb-muted hover:text-rdb-orange" type="button" onClick={() => { playUiSound('click'); navigator.clipboard.writeText(profile.id); addToast('USER ID COPIED'); }} title="Click to copy user ID">{profile.id}</button>
+                <div className="mt-1 flex items-center justify-center gap-1 font-mono text-[11px] uppercase text-rdb-muted sm:justify-start"><Calendar size={12} />JOINED {joined}</div>
                 <div className="mt-5 flex flex-wrap justify-center gap-2 sm:justify-start">
                   <RankBadge tier={profile.rank_tier} />
                   <span className="inline-flex items-center gap-1 border border-rdb-border px-2 py-1 font-mono text-xs uppercase text-rdb-muted"><Trophy size={12} />LEVEL {Math.max(1, Math.floor((profile.points || 0) / 250) + 1)}</span>

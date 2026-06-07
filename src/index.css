@@ -811,6 +811,137 @@ button {
   }
 }
 
+/* ── Win Modal ────────────────────────────────────────────────────── */
+.win-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  animation: win-fade-in 300ms ease both;
+}
+
+.win-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(360px, calc(100vw - 32px));
+  border: 1px solid var(--rdb-orange);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255, 157, 0, 0.15), rgba(5, 6, 9, 0.95) 60%);
+  padding: 40px 24px 28px;
+  text-align: center;
+  animation: win-modal-in 400ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  overflow: hidden;
+}
+
+.win-modal-glow {
+  position: absolute;
+  inset: -50%;
+  background: radial-gradient(circle at 50% 0%, rgba(255, 157, 0, 0.3), transparent 50%);
+  animation: win-glow-pulse 2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.win-modal-icon {
+  position: relative;
+  z-index: 1;
+  color: var(--rdb-orange);
+  filter: drop-shadow(0 0 12px rgba(255, 157, 0, 0.6));
+  animation: win-icon-bounce 600ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.win-modal-title {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  color: var(--rdb-orange);
+  font-family: 'Space Mono', monospace;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-shadow: 0 0 20px rgba(255, 157, 0, 0.5), 0 0 60px rgba(255, 157, 0, 0.2);
+  animation: win-title-in 500ms 200ms ease both;
+}
+
+.win-modal-elo {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  color: #22d3ee;
+  font-family: 'Space Mono', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.5);
+  animation: win-elo-in 400ms 400ms ease both;
+}
+
+.win-modal-close {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #8a8f98;
+  cursor: pointer;
+}
+
+.win-modal-actions {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  animation: win-actions-in 300ms 600ms ease both;
+}
+
+@keyframes win-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes win-modal-in {
+  from { opacity: 0; transform: scale(0.85) translateY(20px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes win-glow-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.1); }
+}
+
+@keyframes win-icon-bounce {
+  from { opacity: 0; transform: scale(0.3) rotate(-15deg); }
+  to   { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+@keyframes win-title-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes win-elo-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes win-actions-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .name-cosmetic,
   .name-effect-pulse,

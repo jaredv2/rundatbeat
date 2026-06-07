@@ -16,7 +16,7 @@ export function validateAudioFile(file) {
   return '';
 }
 
-export function validateAudioDuration(file) {
+export function validateAudioDuration(file, maxSeconds) {
   return new Promise((resolve) => {
     if (!file) {
       resolve('Choose an audio file.');
@@ -27,7 +27,8 @@ export function validateAudioDuration(file) {
     audio.preload = 'metadata';
     audio.onloadedmetadata = () => {
       URL.revokeObjectURL(url);
-      resolve(audio.duration > AUDIO_LIMITS.maxDurationSeconds ? 'Max length is 6 minutes.' : '');
+      const dur = Math.floor(audio.duration);
+      resolve(dur > maxSeconds ? `Audio too long (${dur}s). Max is ${maxSeconds}s.` : '');
     };
     audio.onerror = () => {
       URL.revokeObjectURL(url);

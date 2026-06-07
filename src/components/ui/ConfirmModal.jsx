@@ -1,4 +1,5 @@
 import { Check, X } from 'lucide-react';
+import { playUiSound } from '../../lib/sfx';
 
 export default function ConfirmModal({ open, title, children, onConfirm, onCancel, confirmLabel = 'CONFIRM' }) {
   if (!open) return null;
@@ -8,8 +9,8 @@ export default function ConfirmModal({ open, title, children, onConfirm, onCance
         <h2 className="font-mono text-xl uppercase text-rdb-orange">{title}</h2>
         <div className="mt-4 text-rdb-text">{children}</div>
         <div className="mt-6 grid gap-2 sm:grid-cols-2">
-          <button className="rdb-button w-full" type="button" onClick={onCancel}><X size={14} />CANCEL</button>
-          <button className="rdb-button rdb-button-primary w-full" type="button" onClick={onConfirm}>{typeof confirmLabel === 'string' && <Check size={14} />}{confirmLabel}</button>
+          <button className="rdb-button w-full" type="button" onClick={() => { playUiSound('cancel'); onCancel(); }}><X size={14} />CANCEL</button>
+          <button className="rdb-button rdb-button-primary w-full" type="button" onClick={() => { playUiSound('click'); onConfirm(); }}>{typeof confirmLabel === 'string' && <Check size={14} />}{confirmLabel}</button>
         </div>
       </div>
     </div>

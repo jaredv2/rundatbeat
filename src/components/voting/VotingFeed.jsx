@@ -2,13 +2,32 @@ import { useVoting } from '../../hooks/useVoting';
 import { useUiStore } from '../../store/uiStore';
 import BlindSubmissionCard from './BlindSubmissionCard';
 
+/**
+ * VotingFeed
+ *
+ * Renders the list of anonymous submissions during the voting phase.
+ * Passes the full voterProfile to useVoting so weights are computed.
+ *
+ * Props:
+ *   battle        — battle row
+ *   submissions   — array of submission rows
+ *   profile       — current user's full profile (used as voterProfile)
+ *   votes         — { [submissionId]: direction } map of the user's current votes
+ *   onVoted       — callback after a vote is cast
+ */
 export default function VotingFeed({ battle, submissions, profile, votes = {}, onVoted }) {
   const { vote } = useVoting();
   const addToast = useUiStore((s) => s.addToast);
 
   async function cast(submission, direction) {
     try {
-      await vote({ battleId: battle.id, submission, voterId: profile.id, direction });
+      await vote({
+        battleId: battle.id,
+        submission,
+        voterId: profile.id,
+        voterProfile: profile,   // ← provides rank_tier + created_at for weight
+        direction,
+      });
       addToast('+2 RDB VOTE REWARD');
       onVoted?.();
     } catch (error) {
@@ -16,7 +35,14 @@ export default function VotingFeed({ battle, submissions, profile, votes = {}, o
     }
   }
 
-  if (!submissions.length) return <div className="border border-dashed border-rdb-orange p-6 font-mono text-rdb-orange">NO SUBMISSIONS TO VOTE ON</div>;
+  if (!submissions.length) {
+    return (
+      <div className="border border-dashed border-rdb-orange p-6 font-mono text-rdb-orange">
+        NO SUBMISSIONS TO VOTE ON
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-4">
       {submissions.map((submission, index) => (

@@ -4,12 +4,15 @@ import { generateBattlePrompt } from '../lib/groq';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
+import { playUiSound } from '../lib/sfx';
 
 const HOST_DIRECTIVE = [
   'Generate a complete beat battle prompt with no user-supplied fields.',
-  'Pick one current producer battle lane from trap, rap, hiphop, edm, jersey club, perc40, tdf, jerk, drill, rage, pluggnb, or a similar underground style.',
-  'Use a playable BPM for the chosen lane and give producers one sharp creative limitation.',
+  'Pick one producer battle lane from trap, jersey club, jerk, or drill.',
+  'Use a playable BPM for the chosen lane and give producers one sharp audible limitation (vibe rule, arrangement rule — not production constraints like drum kits or instrument count).',
   'Make the title short, aggressive, memorable, matched to the beat type, and ending with TYPE BEAT.',
+  'Use reference_keywords (not artist names) — searchable YouTube phrases like "dark 808 trap beat".',
+  'flavor_text must start with "Make a beat" and use simple plain words.',
 ].join(' ');
 
 export default function Host() {
@@ -24,10 +27,14 @@ export default function Host() {
 
   async function createBattle() {
     if (status === 'creating') return;
+    playUiSound('click');
     setError('');
     setStatus('creating');
     try {
-      const { json } = await generateBattlePrompt({ directive: HOST_DIRECTIVE, mode: 'quick' });
+      const recentGenres = (() => { try { return JSON.parse(localStorage.getItem('rdb_recent_genres') || '[]'); } catch { return []; } })();
+      const difficulty = ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)];
+      const { json } = await generateBattlePrompt({ directive: HOST_DIRECTIVE, mode: 'quick', recentGenres, difficulty });
+      try { localStorage.setItem('rdb_recent_genres', JSON.stringify([json.genre, ...recentGenres].slice(0, 6))); } catch {}
       const starts = new Date(Date.now() + 5 * 60 * 1000);
       const duration = 60;
       const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
@@ -38,7 +45,7 @@ export default function Host() {
         bpm: Number(json.bpm),
         mood: json.mood,
         restrictions: json.restrictions,
-        reference_artists: Array.isArray(json.reference_artists) ? json.reference_artists : [],
+        reference_artists: Array.isArray(json.reference_keywords) ? json.reference_keywords : Array.isArray(json.reference_artists) ? json.reference_artists : [],
         flavor_text: json.flavor_text,
         duration_minutes: duration,
         mode: 'quick',
@@ -71,7 +78,7 @@ export default function Host() {
       </header>
 
       <section className={`rdb-panel flex min-h-[260px] flex-col items-center justify-center gap-5 p-6 text-center ${status === 'created' ? 'animate-pulse border-rdb-orange' : ''}`}>
-        <div className="font-mono text-[11px] uppercase text-rdb-muted">TRAP | RAP | HIPHOP | EDM | JERSEY CLUB | PERC40 | TDF | JERK | DRILL</div>
+        <div className="font-mono text-[11px] uppercase text-rdb-muted">TRAP | JERSEY CLUB | JERK | DRILL</div>
         {status === 'created' ? (
           <>
             <div className="font-mono text-3xl uppercase text-rdb-orange">OPENING BATTLE</div>

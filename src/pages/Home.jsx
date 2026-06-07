@@ -13,46 +13,54 @@ export default function Home() {
   const navigate = useNavigate();
   const [playOpen, setPlayOpen] = useState(false);
   const [activePlayers, setActivePlayers] = useState(0);
-  const [activeQueues, setActiveQueues] = useState(0);
-  const [activeRooms, setActiveRooms] = useState(0);
   const [activeQueue, setActiveQueue] = useState(null);
   // The room the user is currently a member of (if any)
   const [currentRoom, setCurrentRoom] = useState(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (!profile?.id) return;
     loadHomeStats();
-    const timer = window.setInterval(loadHomeStats, 30000);
-    return () => window.clearInterval(timer);
+    const channel = supabase
+      .channel('home-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members', filter: `user_id=eq.${profile.id}` }, loadHomeStats)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [profile?.id]);
 
   async function loadHomeStats() {
     if (!supabase) return;
     console.log('[Home] Loading home stats');
     const since = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-    const [players, queues, rooms, ownQueue, ownRoom] = await Promise.all([
+    const [players, ownQueue, ownRoom] = await Promise.all([
       supabase.from('user_presence').select('user_id', { count: 'exact', head: true }).gte('last_seen_at', since),
-      supabase.from('matchmaking_queue').select('id', { count: 'exact', head: true }).eq('status', 'waiting'),
-      supabase.from('rooms').select('id', { count: 'exact', head: true }).in('status', ['open', 'locked']),
       profile?.id
         ? supabase.from('matchmaking_queue').select('*').eq('user_id', profile.id).eq('status', 'waiting').order('queued_at', { ascending: false }).limit(1).maybeSingle()
         : Promise.resolve({ data: null }),
       // Check if user is a member of any active room
       profile?.id
         ? supabase.from('room_members')
-            .select('room_id, rooms(id, name, battle_id, status, battles(title))')
+            .select('room_id')
             .eq('user_id', profile.id)
-            .in('rooms.status', ['open', 'locked'])
+            .limit(1)
             .maybeSingle()
         : Promise.resolve({ data: null }),
     ]);
     setActivePlayers(players.count || 0);
-    setActiveQueues(queues.count || 0);
-    setActiveRooms(rooms.count || 0);
     setActiveQueue(ownQueue.data || null);
-    const roomData = ownRoom.data?.rooms || null;
-    console.log('[Home] Current room:', roomData?.id, roomData?.status);
-    setCurrentRoom(roomData || null);
+    // Load current room data (separate query to avoid FK nesting issues)
+    let foundRoom = null;
+    if (ownRoom.data?.room_id) {
+      const { data: roomRow } = await supabase
+        .from('rooms')
+        .select('id, name, battle_id, status, battles(title)')
+        .eq('id', ownRoom.data.room_id)
+        .in('status', ['open', 'locked'])
+        .maybeSingle();
+      foundRoom = roomRow || null;
+    }
+    console.log('[Home] Current room:', foundRoom?.id, foundRoom?.status);
+    setCurrentRoom(foundRoom);
   }
 
   async function cancelQueue() {
@@ -100,7 +108,7 @@ export default function Home() {
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[10px] uppercase text-rdb-muted">
             <span>Status <b>{activeQueue.status}</b></span>
-            <span>ELO <b>{formatNumber(activeQueue.elo || 1000)}</b></span>
+            <span>TIER <b>{profile?.rank_tier?.toUpperCase() || 'BRONZE'}</b></span>
           </div>
           <button
             className="rdb-button mt-3 w-full"
@@ -149,7 +157,10 @@ export default function Home() {
       )}
 
       <section className="home-menu">
-        <h1>RUNDATBEAT</h1>
+        <h1 className="flex flex-col items-center gap-3">
+          <img src="/logo.png" alt="RUNDATBEAT" className="h-28 w-28 sm:h-36 sm:w-36" />
+          <span className="font-mono text-2xl font-bold uppercase tracking-widest text-rdb-orange sm:text-3xl">RUNDATBEAT</span>
+        </h1>
         <div className="home-actions">
           <button
             className="rdb-menu-button border-rdb-orange text-rdb-text"
@@ -158,7 +169,7 @@ export default function Home() {
             onClick={() => { playUiSound('click'); setPlayOpen(true); }}
           >
             <span>{activeQueue ? 'QUEUED' : 'PLAY'}</span>
-            <small>{activeQueue ? 'CANCEL QUEUE TO CHANGE MODES' : 'CASUAL + RANKED + ROOMS'}</small>
+            <small>{activeQueue ? 'CANCEL QUEUE TO CHANGE MODES' : 'SOLO + RANKED + ROOMS'}</small>
           </button>
           <Link className="rdb-menu-button" to="/shop">
             <span>SHOP</span>
@@ -166,15 +177,15 @@ export default function Home() {
           </Link>
           <Link className="rdb-menu-button" to="/leaderboard">
             <span>LEADERBOARD</span>
-            <small>CLIMB THE TIERS</small>
+            <small>CLIMB THE TIERS TO THE TOP</small>
           </Link>
         </div>
       </section>
 
-      <div className="home-active-count">
-        <span>Active players: <b>{formatNumber(activePlayers)}</b></span>
-        <span>Active queues: <b>{formatNumber(activeQueues)}</b></span>
-        <span>Active rooms: <b>{formatNumber(activeRooms)}</b></span><i />
+
+
+      <div className="fixed bottom-4 right-4 z-40 font-mono text-[11px] uppercase text-rdb-muted">
+        Active players: <b className="text-rdb-orange">{formatNumber(activePlayers)}</b>
       </div>
 
       <MatchmakingModal open={playOpen} onClose={() => setPlayOpen(false)} onQueued={loadHomeStats} />

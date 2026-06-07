@@ -9,7 +9,7 @@ export const useTokenStore = create((set) => ({
     if (!userId || !supabase) return;
     const [{ data: profile }, { data: transactions }] = await Promise.all([
       supabase.from('profiles').select('tokens').eq('id', userId).maybeSingle(),
-      supabase.from('token_transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+      supabase.from('token_transactions').select('id, amount, reason, created_at, battle_id').eq('user_id', userId).order('created_at', { ascending: false }).limit(50),
     ]);
     set({ balance: profile?.tokens || 0, transactions: transactions || [] });
   },

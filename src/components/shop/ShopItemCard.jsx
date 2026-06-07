@@ -1,5 +1,6 @@
 import { CheckCircle2, Palette, ShoppingCart, Sparkles, Tag } from 'lucide-react';
 import { getNameCosmeticClassName, getNameGradientStyle, slugCosmeticName } from '../../lib/display';
+import { playUiSound } from '../../lib/sfx';
 import TokenBadge from '../tokens/TokenBadge';
 
 export default function ShopItemCard({ item, balance, owned, onBuy }) {
@@ -26,7 +27,7 @@ export default function ShopItemCard({ item, balance, owned, onBuy }) {
       <p className="mt-2 flex-1 text-[11px] text-rdb-muted">{item.description}</p>
       <div className="mt-3 flex items-center justify-between gap-3">
         <TokenBadge amount={item.cost_tokens} />
-        {owned ? <span className="inline-flex items-center gap-1 font-mono text-[11px] uppercase text-rdb-muted"><CheckCircle2 size={13} />OWNED</span> : <button className="rdb-button border-rdb-orange text-rdb-orange disabled:border-rdb-border disabled:text-rdb-muted" disabled={!canBuy} onClick={() => onBuy(item)}><ShoppingCart size={14} />BUY</button>}
+        {owned ? <span className="inline-flex items-center gap-1 font-mono text-[11px] uppercase text-rdb-muted"><CheckCircle2 size={13} />OWNED</span> : <button className="rdb-button border-rdb-orange text-rdb-orange disabled:border-rdb-border disabled:text-rdb-muted" disabled={!canBuy} onClick={() => { playUiSound('click'); onBuy(item); }}><ShoppingCart size={14} />BUY</button>}
       </div>
       {!owned && !canBuy && <div className="mt-2 font-mono text-[10px] uppercase text-rdb-red">NOT ENOUGH RDB</div>}
     </article>

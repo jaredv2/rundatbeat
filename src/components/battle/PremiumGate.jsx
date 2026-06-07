@@ -1,9 +1,11 @@
 import { supabase } from '../../lib/supabase';
 import { useUiStore } from '../../store/uiStore';
+import { playUiSound } from '../../lib/sfx';
 
 export default function PremiumGate({ battle, profile, onPaid }) {
   const addToast = useUiStore((s) => s.addToast);
   const pay = async () => {
+    playUiSound('click');
     if ((profile?.tokens || 0) < battle.entry_fee_tokens) {
       addToast('NOT ENOUGH RDB', 'error');
       return;
