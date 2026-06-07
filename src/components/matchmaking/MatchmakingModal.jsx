@@ -8,6 +8,8 @@ import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
 
+const MATCHMAKING_FN = 'process-matchmaking';
+
 const DEFAULT_ROOM_SETUP = {
   name: 'PRIVATE STUDIO',
   battleStartSeconds: 60,
@@ -29,6 +31,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
   const [roomSetup, setRoomSetup] = useState(DEFAULT_ROOM_SETUP);
   const [status, setStatus] = useState('idle');
   const [queuedAt, setQueuedAt] = useState(null);
+  const [matchFound, setMatchFound] = useState(false);
 
   const waitingRows = useMemo(() => queueRows.filter((row) => row.mode === tab && row.status === 'waiting'), [queueRows, tab]);
   const visibleRooms = useMemo(() => rooms.filter((room) => room.owner_id === profile?.id || room.is_public !== false), [rooms, profile?.id]);
@@ -43,17 +46,19 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
 
   useEffect(() => {
     if (!open) return;
+    setMatchFound(false);
     loadQueue();
     loadRooms();
     checkForMatch();
-    const interval = setInterval(tryMatchmaking, 5000);
+    const interval = setInterval(() => { processMatchmaking(); checkForMatch(); }, 5000);
     const channel = supabase
       .channel('matchmaking-rooms')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { loadRooms(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matchmaking_queue' }, (payload) => {
-        loadQueue(); tryMatchmaking(); checkForMatch();
+        loadQueue(); processMatchmaking(); checkForMatch();
         if (payload.eventType === 'UPDATE' && payload.new?.user_id === profile?.id && payload.new?.status === 'matched' && payload.new?.battle_id) {
           supabase.from('matchmaking_queue').delete().eq('id', payload.new.id).then(() => {});
+          setMatchFound(true);
           onClose();
           navigate(`/battle/${payload.new.battle_id}`);
         }
@@ -111,6 +116,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
   async function enterQueue() {
     if (!profile || status === 'busy') return;
     setStatus('busy');
+    setMatchFound(false);
     try {
       // Check existing queue entry (clean stale groups first)
       const { data: existingAny } = await supabase
@@ -182,87 +188,26 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     }
   }
 
-  async function tryMatchmaking() {
+  async function processMatchmaking() {
     if (!profile || status !== 'idle') return;
-    const myEntry = queueRows.find((row) => row.user_id === profile.id && row.status === 'waiting' && !row.group_id);
+    const myEntry = queueRows.find((row) => row.user_id === profile.id && row.status === 'waiting');
     if (!myEntry) return;
 
-    const myTier = profile.rank_tier || 'bronze';
-    let groupId = null;
+    setStatus('busy');
     try {
-      const { data: candidates } = await supabase
-        .from('matchmaking_queue')
-        .select('id, user_id, queued_at, profiles(rank_tier)')
-        .eq('mode', 'ranked')
-        .eq('status', 'waiting')
-        .is('group_id', null)
-        .neq('user_id', profile.id)
-        .eq('profiles.rank_tier', myTier)
-        .order('queued_at', { ascending: true });
-
-      const all = [myEntry, ...(candidates || [])];
-      if (all.length < 2) return;
-
-      // Partition all same-tier players into groups of min 2
-      const groups = [];
-      for (let i = 0; i < all.length;) {
-        const remaining = all.length - i;
-        if (remaining >= 3 && remaining % 2 === 1) {
-          groups.push(all.slice(i, i + 3));
-          i += 3;
-        } else {
-          const size = Math.min(2, remaining);
-          groups.push(all.slice(i, i + size));
-          i += size;
-        }
+      const { data, error } = await supabase.functions.invoke(MATCHMAKING_FN);
+      if (error) throw error;
+      if (data?.matched && data?.battle_id) {
+        supabase.from('matchmaking_queue').delete().eq('user_id', profile.id).eq('status', 'matched').then(() => {});
+        setMatchFound(true);
+        playUiSound('success');
+        addToast('MATCH READY');
+        onClose();
+        navigate(`/battle/${data.battle_id}`);
       }
-
-      const myGroup = groups.find((g) => g.some((p) => p.user_id === profile.id));
-      if (!myGroup || myGroup.length < 2) return;
-
-      setStatus('busy');
-      groupId = crypto.randomUUID();
-      const ids = myGroup.map((m) => m.id);
-
-      const { error: claimErr } = await supabase
-        .from('matchmaking_queue')
-        .update({ group_id: groupId })
-        .in('id', ids)
-        .is('group_id', null);
-      if (claimErr) throw claimErr;
-
-      const { count } = await supabase
-        .from('matchmaking_queue')
-        .select('id', { count: 'exact', head: true })
-        .eq('group_id', groupId);
-      if (count < ids.length) {
-        await supabase.from('matchmaking_queue').update({ group_id: null }).eq('group_id', groupId);
-        setStatus('idle');
-        return;
-      }
-
-      const allUserIds = myGroup.map((m) => m.user_id);
-
-      const { battle } = await createAiBattleRoom({
-        mode: 'ranked',
-        members: allUserIds,
-        roomName: 'RANKED MATCH',
-      });
-
-      await supabase
-        .from('matchmaking_queue')
-        .update({ status: 'matched', battle_id: battle.id, matched_at: new Date().toISOString() })
-        .in('user_id', allUserIds)
-        .eq('status', 'waiting');
-
-      playUiSound('success');
-      addToast('MATCH READY');
-      onClose();
-      navigate(`/battle/${battle.id}`);
     } catch {
-      if (groupId) {
-        await supabase.from('matchmaking_queue').update({ group_id: null }).eq('group_id', groupId);
-      }
+      // Edge function may have failed; retry on next interval
+    } finally {
       setStatus('idle');
     }
   }
@@ -280,6 +225,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       .maybeSingle();
     if (data?.battle_id) {
       supabase.from('matchmaking_queue').delete().eq('user_id', profile.id).eq('status', 'matched').then(() => {});
+      setMatchFound(true);
       onClose();
       navigate(`/battle/${data.battle_id}`);
     }
@@ -531,7 +477,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
               </div>
               {ownQueuedRow ? (
                 <div className="mt-4 flex flex-col items-center gap-3 py-6">
-                  {status === 'busy' ? (
+                  {matchFound ? (
                     <>
                       <div className="font-mono text-[11px] uppercase text-green-400">Match found!</div>
                       <div className="font-mono text-[10px] uppercase text-rdb-muted">Starting match...</div>
