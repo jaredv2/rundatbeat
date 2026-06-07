@@ -64,6 +64,13 @@ function PhaseTimer({ label, target, urgent: forcedUrgent }) {
 
 function SongLengthBadge({ seconds }) {
   if (!seconds) return null;
+  if (seconds >= 10000) {
+    return (
+      <span className="font-mono text-[10px] uppercase text-rdb-muted">
+        MAX <span className="text-rdb-text">∞</span>
+      </span>
+    );
+  }
   const mins = Math.floor(seconds / 60);
   const secs = String(seconds % 60).padStart(2, '0');
   return (
@@ -428,7 +435,62 @@ export default function Battle() {
     closed:   'CLOSED',
   }[phase] || phase?.toUpperCase();
 
-  return (
+  return isSolo ? (
+    <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center py-12">
+      <div className="mx-auto w-full max-w-2xl space-y-5">
+        <BattlePrompt battle={battle} />
+
+        {isOwner && phase === 'upcoming' && (
+          <div className="rdb-panel p-5 text-center">
+            <p className="font-mono text-[11px] uppercase text-rdb-muted">SOLO SESSION — READY TO START?</p>
+            <button
+              className="rdb-button rdb-button-primary mt-4"
+              type="button"
+              disabled={isStarting}
+              onClick={handleForceStart}
+            >
+              {isStarting ? 'STARTING...' : 'START NOW'}
+            </button>
+          </div>
+        )}
+        {isOwner && phase === 'active' && (
+          <div className="rdb-panel p-5 text-center">
+            <p className="font-mono text-[11px] uppercase text-green-400">Session active</p>
+            <button
+              className="rdb-button border-rdb-red text-rdb-red mt-4"
+              type="button"
+              disabled={isClosing}
+              onClick={handleForceClose}
+            >
+              {isClosing ? 'CLOSING...' : 'END SESSION'}
+            </button>
+          </div>
+        )}
+        {phase === 'closed' && (
+          <div className="rdb-panel p-5 text-center font-mono text-[11px] uppercase text-rdb-muted">
+            Session ended.
+          </div>
+        )}
+        {!isOwner && phase === 'upcoming' && (
+          <div className="rdb-panel p-5 text-center font-mono text-[11px] uppercase text-rdb-muted">
+            Waiting for host to start the session...
+          </div>
+        )}
+
+        {/* ── Leave button ── */}
+        <div className="text-center">
+          <button
+            className="rdb-button border-rdb-red text-rdb-red"
+            type="button"
+            disabled={leavingRoom}
+            onClick={leaveRoom}
+          >
+            {leavingRoom ? 'LEAVING...' : 'LEAVE'}
+          </button>
+        </div>
+      </div>
+    </main>
+  ) : (
     <main className="rdb-container-admin">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
 

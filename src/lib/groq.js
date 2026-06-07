@@ -8,42 +8,146 @@ const groq = new Groq({
   dangerouslyAllowBrowser: true,
 });
 
+// ─────────────────────────────────────────────
+// GENRE KNOWLEDGE
+// ─────────────────────────────────────────────
+
+const GENRE_KNOWLEDGE = {
+  trap: {
+    energy: "dark, heavy, cinematic, street, menacing",
+    elements: "rolling hi-hats, hard 808s, deep sub bass, melodic leads, piano or strings, sparse percussion",
+    mood_pool: ["cold", "aggressive", "haunting", "midnight", "raw", "hungry", "menacing", "empty", "ruthless", "paranoid"],
+    restriction_pool: [
+      "melody must loop every 2 bars",
+      "no snare — claps only",
+      "808 must carry the melody",
+      "keep it minimal — less than 4 elements",
+      "hi-hats must be rolling triplets",
+      "no chord pads — single note leads only",
+    ],
+    bpm_range: [130, 160],
+    bad_combos: ["upbeat", "tropical", "bouncy", "euphoric", "playful", "fun", "bright", "happy"],
+  },
+  drill: {
+    energy: "cold, dark, sliding, grimy, calculated, UK or Chicago street energy",
+    elements: "sliding 808s, off-beat hi-hats, dark piano or strings, minimal sparse melody, sharp snares",
+    mood_pool: ["cold", "grimy", "ruthless", "icy", "tense", "bleak", "hollow", "calculated", "numb", "street"],
+    restriction_pool: [
+      "808 must slide on every hit",
+      "hi-hats must be triplet pattern",
+      "melody under 3 notes",
+      "no pad — lead melody only",
+      "drums must stay minimal — no fills",
+      "bass must stay below the melody at all times",
+    ],
+    bpm_range: [138, 145],
+    bad_combos: ["bright", "happy", "tropical", "euphoric", "fun", "bouncy", "playful", "uplifting"],
+  },
+  jersey_club: {
+    energy: "high energy, fast, bouncy, dancefloor, chopped vocals, relentless rhythm",
+    elements: "chopped vocal samples, fast kicks, shuffled hi-hats, stab chords, club kick patterns, pitched vocal chops",
+    mood_pool: ["hype", "energetic", "wild", "chaotic", "fun", "dancefloor", "frantic", "electric", "unstoppable", "loud"],
+    restriction_pool: [
+      "vocal chop must drive the melody",
+      "kick pattern must stay on club rhythm",
+      "keep the drop sudden and immediate",
+      "no sustained pads — stabs only",
+      "every 4 bars must have a vocal hit",
+      "melody must be built from chopped samples only",
+    ],
+    bpm_range: [130, 150],
+    bad_combos: ["dark", "cold", "melancholic", "icy", "aggressive", "bleak", "haunting", "hollow"],
+  },
+  jerk: {
+    energy: "bouncy, west coast, rhythmic, melodic, fun, youthful, confident",
+    elements: "bouncy synth bass, bright melodic leads, clap-heavy percussion, chord stabs, playful rhythm",
+    mood_pool: ["bouncy", "playful", "bright", "fun", "energetic", "confident", "carefree", "smooth", "vibrant", "youthful"],
+    restriction_pool: [
+      "clap on every beat",
+      "melody must be bright and simple — under 5 notes",
+      "bass must bounce with the kick",
+      "no dark elements — keep it light",
+      "chord stabs must land on the offbeat",
+      "drum pattern must feel like it wants to make you move",
+    ],
+    bpm_range: [140, 160],
+    bad_combos: ["dark", "cold", "icy", "melancholic", "haunting", "bleak", "grimy", "aggressive"],
+  },
+};
+
+// ─────────────────────────────────────────────
+// DIFFICULTY PROMPTS
+// ─────────────────────────────────────────────
+
 const DIFFICULTY_PROMPTS = {
   easy: [
     'DIFFICULTY: EASY',
-    '- Use common well-known genres (trap, drill)',
-    '- BPM should be in the most comfortable range for the genre',
-    '- Restrictions should be simple (e.g. "catchy melody", "heavy 808s")',
-    '- Mood should be straightforward (e.g. "bright", "energetic", "dark", "smooth")',
+    '- Use trap or drill — the most familiar genres',
+    '- BPM must stay in the comfortable center of the genre range',
+    '- Pick a restriction from the genre restriction_pool exactly as written',
+    '- Mood must come from the genre mood_pool — nothing abstract',
   ],
   medium: [
     'DIFFICULTY: MEDIUM',
-    '- Mix of common and less common genres',
-    '- BPM can be slightly outside the standard range',
-    '- Restrictions should be simple but slightly more creative (e.g. "switch the melody in the second half", "build tension through the intro")',
-    '- Mood can be more abstract but grounded',
+    '- Any genre from the pool is valid',
+    '- BPM can sit near the edge of the genre range',
+    '- Restriction can be slightly adapted from the restriction_pool',
+    '- Mood can be abstract but must still match the genre energy',
   ],
   hard: [
     'DIFFICULTY: HARD',
-    '- Favor less common genres (jersey club, jerk)',
-    '- BPM should push the edge of the genre range or use an unusual tempo',
-    '- Restrictions should be more challenging (e.g. "tropical energy", "vocal chop as the main hook")',
-    '- Mood should be unconventional — explore weird, upbeat, chaotic, or euphoric',
+    '- Prefer jersey club or jerk — less familiar genres',
+    '- BPM must push the edge of the genre range',
+    '- Restriction should combine two ideas from the restriction_pool creatively',
+    '- Mood should be unconventional but still within the genre energy',
   ],
   very_hard: [
     'DIFFICULTY: VERY HARD',
-    '- Pick the most challenging genre from the pool',
-    '- BPM should be extreme for the genre or use an odd implied tempo',
-    '- Restrictions should be creative but still executable (e.g. "blend trap with jazz elements", "complete mood change at the midpoint")',
-    '- Mood must be extreme — avant-garde, euphoric, chaotic, or unsettling',
+    '- Pick the genre that is hardest to execute correctly',
+    '- BPM must be at the extreme edge of the genre range',
+    '- Restriction must be the most challenging from the restriction_pool',
+    '- Mood must be extreme and unconventional — push the genre to its limit',
   ],
 };
 
+// ─────────────────────────────────────────────
+// FLAVOR EXAMPLES
+// ─────────────────────────────────────────────
+
 const FLAVOR_EXAMPLES = [
   '"Make a beat with bright synths and a bouncy groove."',
-  '"Make a beat that feels like a night drive through the city."',
-  '"Make a beat with chaotic energy and an unexpected drop."',
+  '"Make a beat that feels like a night drive through an empty city."',
+  '"Make a beat with chaotic energy and a drop that hits out of nowhere."',
+  '"Make a beat that sounds cold and calculated like you already won."',
+  '"Make a beat that feels like the last song before the club closes."',
 ].join(', ');
+
+// ─────────────────────────────────────────────
+// BUILD GENRE KNOWLEDGE BLOCK
+// ─────────────────────────────────────────────
+
+function buildGenreBlock(recentGenres = []) {
+  const avoidNote = recentGenres.length
+    ? `\nAVOID these recently used genres: ${recentGenres.join(', ')}. Pick a different one.\n`
+    : '';
+
+  const block = Object.entries(GENRE_KNOWLEDGE)
+    .map(([genre, data]) => `
+${genre.toUpperCase()}
+  Energy: ${data.energy}
+  Key elements: ${data.elements}
+  Good moods: ${data.mood_pool.join(', ')}
+  Good restrictions: ${data.restriction_pool.join(' | ')}
+  BPM range: ${data.bpm_range[0]}–${data.bpm_range[1]}
+  NEVER pair with these moods: ${data.bad_combos.join(', ')}
+    `.trim()).join('\n\n');
+
+  return `${avoidNote}${block}`;
+}
+
+// ─────────────────────────────────────────────
+// MAIN EXPORT
+// ─────────────────────────────────────────────
 
 export async function generateBattlePrompt({
   genre = "",
@@ -55,43 +159,43 @@ export async function generateBattlePrompt({
   mode = "quick",
   recentGenres = [],
   difficulty = "medium",
+  practice = false,
 } = {}) {
-  if (!apiKey) {
-    throw new Error("Missing VITE_GROQ_API_KEY");
-  }
+  if (!apiKey) throw new Error("Missing VITE_GROQ_API_KEY");
 
   const difficultyLines = DIFFICULTY_PROMPTS[difficulty] || DIFFICULTY_PROMPTS.medium;
-  const avoidGenres = recentGenres.length
-    ? `\nAVOID these recently used genres: ${recentGenres.join(', ')}. Pick something different.`
+  const temperature = difficulty === 'very_hard' ? 1.1 : 0.9;
+  const practiceNote = practice
+    ? '\nPRACTICE MODE: This is a solo training prompt. Keep restrictions clear and educational. Avoid extreme combinations.'
     : '';
 
-  const temperature = difficulty === 'very_hard' ? 1.1 : 0.9;
-
   const systemContent = `
-You are a battle brief generator for RUNDATBEAT, a competitive producer platform for FL Studio beatmakers.
+You are a battle brief generator for RUNDATBEAT, a competitive FL Studio producer platform.
 
-Your job is to generate one randomized, highly specific battle brief per request.
+Your job: generate one highly specific, musically coherent battle brief per request.
 
-GENRE POOL (pick one at random):
-trap, jersey club, jerk, drill
+━━━ GENRE KNOWLEDGE ━━━
+Use the genre knowledge below to generate accurate, genre-appropriate combinations.
+Mood and restrictions MUST match the genre energy. Never cross into a genre's bad_combos list.
+Always pick mood from the genre's mood_pool. Always pick restrictions from or inspired by the genre's restriction_pool.
 
-BPM RANGES:
-- trap: 140–160
-- drill: 138–145
-- jersey club: 130–150
-- jerk: 140–160
+${buildGenreBlock(recentGenres)}
 
-RULES:
+━━━ OUTPUT RULES ━━━
 - title: punchy, max 5 words, must end with TYPE BEAT
-- genre: one from the pool above
-- bpm: genre-appropriate number
-- mood: one evocative word or short phrase. IMPORTANT: vary moods widely — mix dark, uplifting, bright, energetic, ethereal, fun, melancholic, chaotic. Never default to the same mood twice in a row.
-- restrictions: exactly 1 simple audible limitation voters can hear. NOT production rules (drum kit, instruments, samples).
-- reference_keywords: ALWAYS include exactly 1 YouTube search keyword phrase (NOT an artist name) that describes the target sound, e.g. "hard 808 drill beat". This field is REQUIRED — never omit it.
-- flavor_text: write a short simple sentence starting with "Make a beat" describing the vibe in plain words. Keep it short. Examples: ${FLAVOR_EXAMPLES}
-${difficultyLines.map(l => `- ${l}`).join('\n')}${avoidGenres}
+- genre: one genre from the pool above
+- bpm: a single number within the genre's BPM range
+- mood: one word or short phrase — MUST come from the genre's mood_pool. Never use a bad_combo mood for the chosen genre.
+- restrictions: exactly 1 audible limitation a voter can hear in the final beat. Must come from or be inspired by the genre's restriction_pool. NOT a production rule about what software or samples to use.
+- reference_keywords: exactly 1 YouTube search phrase ending in "type beat" describing the target sound. Examples: "hard drill type beat", "jersey club type beat", "dark trap type beat". NEVER omit this field. NEVER use an artist name.
+- flavor_text: one short sentence starting with "Make a beat" describing the vibe plainly. Vary it — do not repeat. Examples: ${FLAVOR_EXAMPLES}
+${difficultyLines.map(l => `- ${l}`).join('\n')}${practiceNote}
 
-Return ONLY valid JSON. No markdown, no explanation, no backticks.
+━━━ IMPORTANT ━━━
+- Never combine a genre with a mood from its bad_combos list — this is a hard rule
+- Restrictions must be something a listener can actually hear — not "use a specific drum kit"
+- Vary output every time — no two briefs should feel the same
+- Return ONLY valid raw JSON. No markdown, no explanation, no backticks.
 
 {
   "title": "...",
@@ -104,9 +208,9 @@ Return ONLY valid JSON. No markdown, no explanation, no backticks.
 }
   `.trim();
 
-  // difficulty is always in systemContent regardless of directive
+  // difficulty is always injected via systemContent — directive only overrides the user message
   const userMessage = directive
-    || `Generate a ${mode} battle prompt for a ${genre} beat at ${bpm} BPM with a ${mood} mood. Restrictions hint: ${restrictions}. Reference artists: ${reference_artists}.`;
+    || `Generate a ${mode} battle prompt for a ${genre || 'random genre'} beat at ${bpm} BPM with a ${mood || 'genre-appropriate'} mood. Restrictions hint: ${restrictions || 'pick from genre pool'}. Reference artists: ${reference_artists || 'none'}.`;
 
   const completion = await groq.chat.completions.create({
     model: GROQ_MODEL,
@@ -121,6 +225,7 @@ Return ONLY valid JSON. No markdown, no explanation, no backticks.
   const raw = completion.choices?.[0]?.message?.content?.trim() || "";
 
   function normalizeJson(json) {
+    // enforce reference_keywords always exists
     if (
       !json.reference_keywords ||
       !Array.isArray(json.reference_keywords) ||
@@ -136,6 +241,18 @@ Return ONLY valid JSON. No markdown, no explanation, no backticks.
           : `${json.genre || 'trap'} type beat`,
       ];
     }
+
+    // enforce mood never lands in bad_combos for the genre
+    const genreData = GENRE_KNOWLEDGE[json.genre?.toLowerCase()];
+    if (genreData && json.mood) {
+      const moodLower = json.mood.toLowerCase();
+      const isBadCombo = genreData.bad_combos.some(bad => moodLower.includes(bad));
+      if (isBadCombo) {
+        // replace with a safe mood from the pool
+        json.mood = genreData.mood_pool[Math.floor(Math.random() * genreData.mood_pool.length)];
+      }
+    }
+
     return json;
   }
 
@@ -163,6 +280,10 @@ Return ONLY valid JSON. No markdown, no explanation, no backticks.
   }
 }
 
+// ─────────────────────────────────────────────
+// TIER → DIFFICULTY MAPPER
+// ─────────────────────────────────────────────
+
 export function difficultyFromTier(tier) {
   const order = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'elite', 'champion', 'goat'];
   const idx = order.indexOf(tier?.toLowerCase() || 'bronze');
@@ -171,3 +292,9 @@ export function difficultyFromTier(tier) {
   if (idx <= 5) return 'hard';
   return 'very_hard';
 }
+
+// ─────────────────────────────────────────────
+// EXPORT GENRE DATA (for use in UI if needed)
+// ─────────────────────────────────────────────
+
+export { GENRE_KNOWLEDGE };

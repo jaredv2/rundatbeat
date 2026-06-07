@@ -183,10 +183,18 @@ export default function SocialHub({ producers = [] }) {
         <div className="mt-3 grid gap-2">
           {rooms.map((room) => (
             <div className="grid items-center gap-2 border-t border-rdb-border py-2 font-mono text-[11px] uppercase md:grid-cols-[1fr_70px_70px_auto_auto_auto]" key={room.id}>
-              <button className={`text-left ${selectedRoom?.id === room.id ? 'text-rdb-orange' : 'text-rdb-text'}`} type="button" onClick={() => joinRoom(room)}>{room.name}</button>
+              {room.status === 'locked' ? (
+                <span className="text-rdb-muted">{room.name}</span>
+              ) : (
+                <button className={`text-left ${selectedRoom?.id === room.id ? 'text-rdb-orange' : 'text-rdb-text'}`} type="button" onClick={() => joinRoom(room)}>{room.name}</button>
+              )}
               <span className="text-rdb-muted">{room.status}</span>
               <span className="text-rdb-muted">{room.room_members?.[0]?.count || room.current_players || 0}/{room.max_players || 4}</span>
-              <button className="rdb-button" type="button" onClick={() => joinRoom(room)}>JOIN</button>
+              {room.status === 'locked' ? (
+                <span className="rdb-button opacity-50 cursor-not-allowed text-rdb-muted">LOCKED</span>
+              ) : (
+                <button className="rdb-button" type="button" onClick={() => joinRoom(room)}>JOIN</button>
+              )}
               {room.owner_id === profile?.id && <button className="rdb-button" type="button" onClick={() => closeRoom(room)}>{room.status === 'locked' ? 'OPEN' : 'LOCK'}</button>}
               {room.owner_id === profile?.id && <button className="rdb-button" type="button" onClick={() => removeRoom(room)}>REMOVE</button>}
             </div>

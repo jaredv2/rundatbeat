@@ -147,6 +147,15 @@ export function useBattle(id) {
             console.log('[useBattle] realtime room update → status:', payload.new?.status);
             setRoom((prev) => ({ ...prev, ...payload.new }));
             roomIdRef.current = payload.new?.id ?? roomIdRef.current;
+            // Sync battle status from room (battles table may not be in realtime publication)
+            const rs = payload.new?.status;
+            if (rs === 'closed' || rs === 'voting' || rs === 'locked') {
+              setBattle((prev) => {
+                if (prev?.status === rs) return prev;
+                const mapped = rs === 'locked' ? 'active' : rs;
+                return { ...prev, status: mapped };
+              });
+            }
           },
         )
 

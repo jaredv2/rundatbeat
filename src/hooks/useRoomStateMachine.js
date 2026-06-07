@@ -130,8 +130,15 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${room.id}` },
         (payload) => {
-          const nextPhase = derivePhase(battle, payload.new);
-          console.log('[RoomFSM] realtime room update → phase:', nextPhase, '| room.status:', payload.new?.status);
+          const rs = payload.new?.status;
+          // rooms table IS in realtime publication but battles might not be.
+          // Derive phase from room status as fallback.
+          let nextPhase;
+          if (rs === 'closed') nextPhase = 'closed';
+          else if (rs === 'voting') nextPhase = 'voting';
+          else if (rs === 'locked') nextPhase = 'active';
+          else nextPhase = derivePhase(battle, payload.new);
+          console.log('[RoomFSM] realtime room update → phase:', nextPhase, '| room.status:', rs);
           setPhase(nextPhase);
           setPhaseEndsAt(phaseEndTimestamp(nextPhase, battle, payload.new));
           onStateChange?.(nextPhase, battle, payload.new);
@@ -222,8 +229,8 @@ async function advanceToActive(battleId, roomId, isSolo = false) {
       .eq('id', roomId)
       .in('status', ['open', 'locked']),
   ]);
-  if (battleRes.error) console.error('[RoomFSM] advanceToActive battles error:', battleRes.error);
-  if (roomRes.error)   console.error('[RoomFSM] advanceToActive rooms error:', roomRes.error);
+  if (battleRes.error) throw new Error(`advanceToActive battles: ${battleRes.error.message}`);
+  if (roomRes.error) throw new Error(`advanceToActive rooms: ${roomRes.error.message}`);
 }
 
 async function advanceToVoting(battleId, roomId, votingMinutes = DEFAULT_VOTING_MINUTES) {
@@ -241,8 +248,8 @@ async function advanceToVoting(battleId, roomId, votingMinutes = DEFAULT_VOTING_
       .eq('id', roomId)
       .in('status', ['open', 'locked']),
   ]);
-  if (battleRes.error) console.error('[RoomFSM] advanceToVoting battles error:', battleRes.error);
-  if (roomRes.error)   console.error('[RoomFSM] advanceToVoting rooms error:', roomRes.error);
+  if (battleRes.error) throw new Error(`advanceToVoting battles: ${battleRes.error.message}`);
+  if (roomRes.error) throw new Error(`advanceToVoting rooms: ${roomRes.error.message}`);
 }
 
 async function advanceToClosed(battleId, roomId) {
@@ -258,8 +265,8 @@ async function advanceToClosed(battleId, roomId) {
       .eq('id', roomId)
       .in('status', ['open', 'locked', 'voting']),
   ]);
-  if (battleRes.error) console.error('[RoomFSM] advanceToClosed battles error:', battleRes.error);
-  if (roomRes.error)   console.error('[RoomFSM] advanceToClosed rooms error:', roomRes.error);
+  if (battleRes.error) throw new Error(`advanceToClosed battles: ${battleRes.error.message}`);
+  if (roomRes.error) throw new Error(`advanceToClosed rooms: ${roomRes.error.message}`);
 
   // Ranked: update ELOs and stats (skip if early_closed — no rewards)
   if (!battleRes.error) {

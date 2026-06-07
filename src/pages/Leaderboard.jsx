@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import RankBadge from '../components/ui/RankBadge';
-import { formatNumber, getNameCosmeticClassName, getNameGradientStyle } from '../lib/display';
+import { formatNumber, getNameCosmeticClassName, getNameGradientStyle, getNameplateEmoji } from '../lib/display';
 import { supabase } from '../lib/supabase';
 import { playUiSound } from '../lib/sfx';
 
@@ -27,7 +27,7 @@ export default function Leaderboard() {
 
   useEffect(() => {
     Promise.all([
-      supabase?.from('profiles').select('id, username, avatar_url, elo, rank_tier, wins, battles_entered, points, name_cosmetic, display_name').order('points', { ascending: false }).limit(200),
+      supabase?.from('profiles').select('id, username, avatar_url, elo, rank_tier, wins, battles_entered, points, nameplate_icon, active_name_color, active_name_effect').order('points', { ascending: false }).limit(200),
       supabase?.from('leaderboard_period_stats').select('*'),
     ]).then(([profileRows, statRows]) => {
       setUsers(profileRows?.data || []);
@@ -145,6 +145,9 @@ export default function Leaderboard() {
                       to={`/profile/${user.username}`}
                       style={getNameGradientStyle(user)}
                     >
+                      {user.nameplate_icon && (
+                        <span className="mr-1 text-rdb-orange">{getNameplateEmoji(user.nameplate_icon)}</span>
+                      )}
                       {user.username}
                     </Link>
                   </td>

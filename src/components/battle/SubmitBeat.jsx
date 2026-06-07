@@ -26,7 +26,7 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
       setError(validation);
       return;
     }
-    const maxSec = battle.song_length_seconds || AUDIO_LIMITS.maxDurationSeconds;
+    const maxSec = battle.song_length_seconds >= 10000 ? Infinity : (battle.song_length_seconds || AUDIO_LIMITS.maxDurationSeconds);
     const durationError = await validateAudioDuration(file, maxSec);
     if (durationError) {
       setError(durationError);
@@ -57,7 +57,7 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
       <h2 className="font-mono text-xl uppercase text-rdb-orange">SUBMIT BEAT</h2>
       {error && <div className="border border-rdb-red p-3 font-mono text-rdb-red">{error}</div>}
       <input className="rdb-input" type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-      {file && <div className="font-mono text-sm text-rdb-muted">{file.name} - {(file.size / 1024 / 1024).toFixed(2)}MB / max {(AUDIO_LIMITS.maxSizeBytes / 1024 / 1024).toFixed(0)}MB, {Math.floor((battle.song_length_seconds || AUDIO_LIMITS.maxDurationSeconds) / 60)}:{String((battle.song_length_seconds || AUDIO_LIMITS.maxDurationSeconds) % 60).padStart(2, '0')} max</div>}
+      {file && <div className="font-mono text-sm text-rdb-muted">{file.name} - {(file.size / 1024 / 1024).toFixed(2)}MB / max {(AUDIO_LIMITS.maxSizeBytes / 1024 / 1024).toFixed(0)}MB, {maxSec === Infinity ? '∞' : `${Math.floor(maxSec / 60)}:${String(maxSec % 60).padStart(2, '0')}`} max</div>}
       <textarea className="rdb-input min-h-28" placeholder="DESCRIPTION" value={description} onChange={(e) => setDescription(e.target.value)} />
       {progress > 0 && <UploadProgress value={progress} />}
       <button className="rdb-button rdb-button-primary" type="submit">SUBMIT BEAT</button>

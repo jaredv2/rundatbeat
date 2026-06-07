@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import TokenBadge from '../components/tokens/TokenBadge';
 import { formatNumber } from '../lib/display';
 import { supabase } from '../lib/supabase';
 import { useUiStore } from '../store/uiStore';
+import { useAuthStore } from '../store/authStore';
 import { playUiSound } from '../lib/sfx';
 
 const ACTIVE_ROOM_STATUSES = ['open', 'locked'];
@@ -17,9 +18,7 @@ const dayLabel = (offset) => {
 };
 
 export default function Admin() {
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [accessKey, setAccessKey] = useState('');
-  const [accessError, setAccessError] = useState('');
+  const { profile } = useAuthStore();
   const [battles, setBattles] = useState([]);
   const [users, setUsers] = useState([]);
   const [rooms, setRooms] = useState([]);
@@ -141,7 +140,7 @@ export default function Admin() {
       supabase.from('profiles').select('id, username, elo, rank_tier, wins, points, tokens, banned_until, created_at').order('created_at', { ascending: false }).limit(100),
       supabase.from('rooms').select('*, room_members(count)').in('status', ACTIVE_ROOM_STATUSES).order('created_at', { ascending: false }),
       supabase.from('matchmaking_queue').select('id, user_id, mode, status, group_id, queued_at, profiles(username, rank_tier)').eq('status', 'waiting').order('queued_at', { ascending: true }),
-      supabase.from('user_presence').select('user_id, last_seen_at, status').order('last_seen_at', { ascending: false }).limit(100),
+      supabase.from('user_presence').select('user_id, last_seen_at').order('last_seen_at', { ascending: false }).limit(100),
       supabase.from('token_transactions').select('*, profiles(username)').eq('reason', reasonFilter || 'shop_purchase').order('created_at', { ascending: false }).limit(200),
       supabase.from('shop_items').select('*').order('cost_tokens'),
       supabase.from('shop_review_queue').select('*, profiles(username)').eq('status', 'pending').order('purchased_at', { ascending: true }),
@@ -158,18 +157,17 @@ export default function Admin() {
     setSiteStats(statsRows.data || []);
   }
 
-  function verifyAccess(event) {
-    playUiSound('click');
-    event.preventDefault();
-    if (accessKey === import.meta.env.VITE_ADMIN_KEY) {
-      setAccessError('');
-      setIsUnlocked(true);
-      return;
-    }
-    setAccessError('INVALID KEY');
-  }
+  useEffect(() => { load(); }, [reasonFilter]);
 
-  useEffect(() => { if (isUnlocked) load(); }, [isUnlocked, reasonFilter]);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
+  useEffect(() => {
+    if (!supabase) return;
+    loadRef.current();
+    const interval = setInterval(() => loadRef.current(), 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   async function adjust(user, amount) {
     playUiSound('click');
@@ -183,16 +181,26 @@ export default function Admin() {
   async function banUser(user) {
     playUiSound('click');
     const bannedUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    await supabase.from('profiles').update({ banned_until: bannedUntil, ban_reason: 'admin action' }).eq('id', user.id);
-    addToast('USER BANNED');
-    load();
+    try {
+      const { error } = await supabase.from('profiles').update({ banned_until: bannedUntil }).eq('id', user.id);
+      if (error) throw error;
+      addToast('USER BANNED');
+      load();
+    } catch (err) {
+      addToast(err.message || 'BAN FAILED', 'error');
+    }
   }
 
   async function unbanUser(user) {
     playUiSound('click');
-    await supabase.from('profiles').update({ banned_until: null, ban_reason: null }).eq('id', user.id);
-    addToast('USER UNBANNED');
-    load();
+    try {
+      const { error } = await supabase.from('profiles').update({ banned_until: null }).eq('id', user.id);
+      if (error) throw error;
+      addToast('USER UNBANNED');
+      load();
+    } catch (err) {
+      addToast(err.message || 'UNBAN FAILED', 'error');
+    }
   }
 
   async function removeRoom(room) {
@@ -236,25 +244,22 @@ export default function Admin() {
     load();
   }
 
-  if (!isUnlocked) {
+  const adminUserId = import.meta.env.VITE_ADMIN_USER_ID;
+  if (!profile) {
     return (
       <main className="grid min-h-[70vh] place-items-center px-4 py-12">
-        <form className="w-full max-w-[360px] border border-rdb-border bg-rdb-surface p-5" onSubmit={verifyAccess}>
-          <h1 className="font-mono text-[13px] uppercase leading-none text-rdb-orange">ADMIN ACCESS</h1>
-          <p className="mt-3 font-mono text-[11px] uppercase text-rdb-muted">ENTER ACCESS KEY TO CONTINUE</p>
-          <input
-            className={`mt-5 w-full border bg-rdb-bg p-3 font-mono text-sm text-rdb-text outline-none placeholder:text-rdb-muted focus:border-rdb-orange focus:shadow-[0_0_0_1px_#FF8C00] ${accessError ? 'border-rdb-red' : 'border-rdb-orange'}`}
-            type="password"
-            placeholder="ACCESS KEY"
-            value={accessKey}
-            onChange={(event) => {
-              setAccessKey(event.target.value);
-              setAccessError('');
-            }}
-          />
-          {accessError && <div className="mt-2 font-mono text-xs uppercase text-rdb-red">{accessError}</div>}
-          <button className="rdb-button mt-4 w-full border-rdb-orange text-rdb-orange" type="submit">VERIFY</button>
-        </form>
+        <div className="w-full max-w-[360px] border border-rdb-border bg-rdb-surface p-5 text-center">
+          <h1 className="font-mono text-[13px] uppercase text-rdb-orange">PLEASE LOG IN</h1>
+        </div>
+      </main>
+    );
+  }
+  if (!adminUserId || profile.id !== adminUserId) {
+    return (
+      <main className="grid min-h-[70vh] place-items-center px-4 py-12">
+        <div className="w-full max-w-[360px] border border-rdb-border bg-rdb-surface p-5 text-center">
+          <h1 className="font-mono text-[13px] uppercase text-rdb-orange">NOT AUTHORIZED</h1>
+        </div>
       </main>
     );
   }

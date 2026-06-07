@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, Globe2, KeyRound, LockKeyhole, Music, Timer, Users, Wand2, X } from 'lucide-react';
+import { Clock, Globe2, Music, Timer, Users, Wand2, X } from 'lucide-react';
 import { generateBattlePrompt, difficultyFromTier } from '../../lib/groq';
 import { playUiSound } from '../../lib/sfx';
 import { supabase } from '../../lib/supabase';
@@ -21,7 +21,7 @@ const SOLO_DIRECTIVE = [
   'Make the restrictions fair, audible in the final beat, and easy for voters to judge.',
 ].join(' ');
 
-const TIER_ORDER = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'elite', 'champion', 'goat'];
+const OVERTIME_SECONDS = 20;
 
 const DEFAULT_ROOM_SETUP = {
   name: 'PRIVATE STUDIO',
@@ -30,9 +30,8 @@ const DEFAULT_ROOM_SETUP = {
   songLengthSeconds: 60,
   votingMinutes: 3,
   aiInstructions: '',
-  minRankTier: 'bronze',
-  codeOnly: false,
   isPublic: true,
+  soloDifficulty: 'medium',
 };
 
 export default function MatchmakingModal({ open, onClose, onQueued }) {
@@ -43,7 +42,6 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
   const [queueRows, setQueueRows] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [roomSetup, setRoomSetup] = useState(DEFAULT_ROOM_SETUP);
-  const [joinCode, setJoinCode] = useState('');
   const [status, setStatus] = useState('idle');
   const [queuedAt, setQueuedAt] = useState(null);
 
@@ -52,6 +50,21 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
   const ownWaitingRow = useMemo(() => waitingRows.find((row) => row.user_id === profile?.id), [waitingRows, profile?.id]);
   const ownQueuedRow = useMemo(() => queueRows.find((row) => row.user_id === profile?.id && row.status === 'waiting'), [queueRows, profile?.id]);
   const tier = profile?.rank_tier || 'bronze';
+
+  const sameTierWaiting = useMemo(
+    () => waitingRows.filter((r) => (r.profiles?.rank_tier || 'bronze') === tier),
+    [waitingRows, tier],
+  );
+  const overtimeEarliest = useMemo(() => {
+    if (sameTierWaiting.length < 2) return null;
+    return sameTierWaiting.reduce((a, b) => (new Date(a.queued_at) < new Date(b.queued_at) ? a : b));
+  }, [sameTierWaiting]);
+  const overtimeRemaining = useMemo(() => {
+    if (!overtimeEarliest) return 0;
+    const elapsed = Date.now() - new Date(overtimeEarliest.queued_at).getTime();
+    return Math.max(0, OVERTIME_SECONDS * 1000 - elapsed);
+  }, [overtimeEarliest]);
+  const isOvertime = overtimeRemaining > 0;
 
   useEffect(() => {
     if (!open) return;
@@ -77,6 +90,13 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       }
     };
   }, [open]);
+
+  // Faster polling during overtime to catch match start as soon as it's ready
+  useEffect(() => {
+    if (!open || !isOvertime) return;
+    const fast = setInterval(tryMatchmaking, 3000);
+    return () => clearInterval(fast);
+  }, [open, isOvertime]);
 
   // ── Tiny isolated component for elapsed timer ─────────────────────────────
   function ElapsedTimer({ queuedAt: from }) {
@@ -105,7 +125,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
   async function loadRooms() {
     const { data } = await supabase
       .from('rooms')
-      .select('*, room_members(count)')
+      .select('*, room_members(count), battles(status)')
       .in('status', ['open', 'locked'])
       .neq('mode', 'ranked')
       .order('created_at', { ascending: false })
@@ -173,55 +193,17 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
         (c) => (c.profiles?.rank_tier || 'bronze') === myTier
       );
 
-      let groupId;
       if (sameTier.length >= 1) {
-        // Found at least 1 other same-tier player — form a group
-        groupId = crypto.randomUUID();
-        const ids = sameTier.map((m) => m.id);
-
-        const { error: claimErr } = await supabase
-          .from('matchmaking_queue')
-          .update({ group_id: groupId })
-          .in('id', ids)
-          .is('group_id', null);
-        if (claimErr) throw claimErr;
-
-        const { data: verify } = await supabase
-          .from('matchmaking_queue')
-          .select('id')
-          .eq('group_id', groupId);
-        if ((verify || []).length < 1) {
-          await supabase.from('matchmaking_queue').insert({ user_id: profile.id, mode: 'ranked', elo });
-          await loadQueue();
-          playUiSound('queue');
-          addToast('QUEUED — WAITING FOR PLAYERS');
-          setQueuedAt(Date.now());
-          setStatus('idle'); onQueued?.(); return;
-        }
-
-        // Add self to group
+        // Found at least 1 other same-tier player — queue normally
+        // Overtime in tryMatchmaking will handle the match
         await supabase.from('matchmaking_queue').insert({
-          user_id: profile.id, mode: 'ranked', elo, group_id: groupId,
+          user_id: profile.id, mode: 'ranked', elo,
         });
-
-        const allUserIds = [...sameTier.map((m) => m.user_id), profile.id];
-
-        const { battle, room } = await createAiBattleRoom({
-          mode: 'ranked',
-          members: allUserIds,
-          roomName: 'RANKED MATCH',
-        });
-
-        await supabase
-          .from('matchmaking_queue')
-          .delete()
-          .in('user_id', allUserIds)
-          .eq('status', 'waiting');
-
-        playUiSound('success');
-        addToast('MATCH READY');
-        onClose();
-        navigate(`/battle/${battle.id}`);
+        await loadQueue();
+        playUiSound('queue');
+        addToast('QUEUED — MATCH STARTING SOON');
+        setQueuedAt(Date.now());
+        onQueued?.();
       } else {
         // No same-tier players — queue alone
         await supabase.from('matchmaking_queue').insert({
@@ -236,9 +218,6 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
 
       setStatus('idle');
     } catch (error) {
-      if (groupId) {
-        supabase.from('matchmaking_queue').delete().eq('group_id', groupId).then();
-      }
       setStatus('idle');
       addToast(error.message || 'QUEUE FAILED', 'error');
     }
@@ -276,11 +255,11 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     if (!myEntry) return;
 
     const myTier = profile.rank_tier || 'bronze';
-    let groupId;
+    let groupId = null;
     try {
       const { data: candidates } = await supabase
         .from('matchmaking_queue')
-        .select('id, user_id, profiles(rank_tier)')
+        .select('id, user_id, queued_at, profiles(rank_tier)')
         .eq('mode', 'ranked')
         .eq('status', 'waiting')
         .is('group_id', null)
@@ -293,6 +272,11 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       );
       if (sameTier.length < 1) return;
 
+      // Overtime: wait until the oldest queued player has waited OVERTIME_SECONDS
+      const allQueuedAts = [myEntry, ...sameTier].map((r) => new Date(r.queued_at).getTime());
+      const oldest = Math.min(...allQueuedAts);
+      if (Date.now() - oldest < OVERTIME_SECONDS * 1000) return;
+
       setStatus('busy');
       groupId = crypto.randomUUID();
       const ids = sameTier.map((m) => m.id);
@@ -304,16 +288,20 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
         .is('group_id', null);
       if (claimErr) throw claimErr;
 
-      const { data: verify } = await supabase
-        .from('matchmaking_queue')
-        .select('id')
-        .eq('group_id', groupId);
-      if ((verify || []).length < 1) { setStatus('idle'); return; }
-
       await supabase
         .from('matchmaking_queue')
         .update({ group_id: groupId })
         .eq('id', myEntry.id);
+
+      const { count } = await supabase
+        .from('matchmaking_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('group_id', groupId);
+      if (count < sameTier.length + 1) {
+        await supabase.from('matchmaking_queue').update({ group_id: null }).eq('group_id', groupId);
+        setStatus('idle');
+        return;
+      }
 
       const allUserIds = [...sameTier.map((m) => m.user_id), profile.id];
 
@@ -335,13 +323,13 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       navigate(`/battle/${battle.id}`);
     } catch {
       if (groupId) {
-        supabase.from('matchmaking_queue').delete().eq('group_id', groupId).then();
+        await supabase.from('matchmaking_queue').update({ group_id: null }).eq('group_id', groupId);
       }
       setStatus('idle');
     }
   }
 
-  async function createAiBattleRoom({ mode, ownerId, members, queueId = null, roomName, setup = null }) {
+  async function createAiBattleRoom({ mode, ownerId, members, queueId = null, roomName, setup = null, difficultyOverride = null }) {
     const isRanked = mode === 'ranked';
     const normalizedSetup = setup ? normalizeRoomSetup(setup) : null;
     const directive = mode === 'solo' ? SOLO_DIRECTIVE : QUEUE_DIRECTIVE;
@@ -349,9 +337,9 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       ? `${directive} Host custom instructions: ${normalizedSetup.aiInstructions}. Keep it concise and enforce the host's instruction.`
       : directive;
 
-    const difficulty = isRanked
+    const difficulty = difficultyOverride || (isRanked
       ? difficultyFromTier(profile?.rank_tier)
-      : ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)];
+      : ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)]);
     const recentGenres = (() => { try { return JSON.parse(localStorage.getItem('rdb_recent_genres') || '[]'); } catch { return []; } })();
     const { json } = await generateBattlePrompt({ directive: customDirective, mode, recentGenres, difficulty });
     try { localStorage.setItem('rdb_recent_genres', JSON.stringify([json.genre, ...recentGenres].slice(0, 6))); } catch {}
@@ -394,33 +382,23 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       song_length_seconds: normalizedSetup?.songLengthSeconds || 60,
       voting_minutes: normalizedSetup?.votingMinutes || 3,
       ai_instructions: normalizedSetup?.aiInstructions || '',
-      min_rank_tier: normalizedSetup?.minRankTier || 'bronze',
-      join_code: normalizedSetup?.joinCode || null,
-      code_only: Boolean(normalizedSetup?.codeOnly),
       is_public: isRanked ? false : normalizedSetup?.isPublic !== false,
     }).select('*').single();
     if (roomError) throw roomError;
 
-    await supabase.from('room_members').upsert(members.map((userId) => ({
+    const { error: membersErr } = await supabase.from('room_members').upsert(members.map((userId, i) => ({
       room_id: room.id,
       user_id: userId,
-      role: 'member',
+      role: isRanked ? 'member' : (i === 0 ? 'owner' : 'member'),
     })));
+    if (membersErr) throw membersErr;
 
     return { battle, room };
   }
 
-  async function joinRoom(room, options = {}) {
+  async function joinRoom(room) {
     playUiSound('click');
     if (!profile || status === 'busy') return;
-    if (!options.byCode && room.code_only) {
-      addToast('ENTER ROOM CODE TO JOIN', 'error');
-      return;
-    }
-    if (!canJoinTier(profile.rank_tier, room.min_rank_tier)) {
-      addToast(`MIN TIER ${room.min_rank_tier || 'BRONZE'} REQUIRED`, 'error');
-      return;
-    }
     setStatus('busy');
     try {
       await supabase.from('room_members').upsert({ room_id: room.id, user_id: profile.id, role: room.owner_id === profile.id ? 'owner' : 'member' });
@@ -463,13 +441,23 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     if (!profile || status === 'busy') return;
     setStatus('busy');
     try {
-      const setup = normalizeRoomSetup(roomSetup);
+      const s = roomSetup;
+      const parts = ['Generate a solo producer beat battle prompt for a practice session.', 'Pick a current competitive beat lane and make the title match that lane.', 'The title must end with TYPE BEAT.', 'Make the restrictions fair, audible in the final beat, and easy for voters to judge.'];
+      if (s.soloMood) parts.push(`Mood: ${s.soloMood}.`);
+      if (s.soloFeeling) parts.push(`Feeling/vibe: ${s.soloFeeling}.`);
+      if (s.soloType) parts.push(`Beat type: ${s.soloType}.`);
+      if (s.soloGenre) parts.push(`Genre: ${s.soloGenre}.`);
+      if (s.soloBpm) parts.push(`BPM: ${s.soloBpm}.`);
+      if (s.soloRestriction) parts.push(`Restriction: ${s.soloRestriction}.`);
+      const soloDirective = parts.join(' ');
+      const setup = { ...s, aiInstructions: soloDirective };
       const { battle } = await createAiBattleRoom({
         mode: 'solo',
         ownerId: profile.id,
         members: [profile.id],
         roomName: 'SOLO SESSION',
         setup,
+        difficultyOverride: s.soloDifficulty === 'expert' ? 'hard' : s.soloDifficulty === 'impossible' ? 'very_hard' : s.soloDifficulty,
       });
       addToast('SOLO SESSION STARTED');
       onClose();
@@ -478,28 +466,6 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       addToast(error.message || 'SOLO START FAILED', 'error');
     } finally {
       setStatus('idle');
-    }
-  }
-
-  async function joinRoomByCode() {
-    playUiSound('click');
-    if (!joinCode.trim() || status === 'busy') return;
-    setStatus('busy');
-    try {
-      const { data, error } = await supabase
-        .from('rooms')
-        .select('*, room_members(count)')
-        .eq('join_code', joinCode.trim().toUpperCase())
-        .in('status', ['open', 'locked'])
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) throw new Error('ROOM CODE NOT FOUND');
-      setStatus('idle');
-      await joinRoom(data, { byCode: true });
-    } catch (error) {
-      setStatus('idle');
-      addToast(error.message || 'ROOM CODE FAILED', 'error');
     }
   }
 
@@ -549,26 +515,38 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
                 <Wand2 size={15} />Solo Session
               </div>
               <div className="mt-3 grid gap-2">
-                <LabeledField icon={<Clock size={13} />} label="Start Timer">
-                  <input className="rdb-input" min="0" max="600" type="number" value={roomSetup.battleStartSeconds} onChange={(event) => updateRoomSetup('battleStartSeconds', event.target.value)} />
-                </LabeledField>
-                <LabeledField icon={<Timer size={13} />} label="Battle Min">
-                  <input className="rdb-input" min="1" type="number" value={roomSetup.battleMinutes} onChange={(event) => updateRoomSetup('battleMinutes', event.target.value)} />
-                </LabeledField>
-                <LabeledField icon={<Music size={13} />} label="Song Length Sec">
-                  <input className="rdb-input" min="15" max="240" type="number" value={roomSetup.songLengthSeconds} onChange={(event) => updateRoomSetup('songLengthSeconds', event.target.value)} />
-                </LabeledField>
-                <LabeledField icon={<Timer size={13} />} label="Voting Min">
-                  <input className="rdb-input" min="1" max="60" type="number" value={roomSetup.votingMinutes} onChange={(event) => updateRoomSetup('votingMinutes', event.target.value)} />
-                </LabeledField>
-                <LabeledField icon={<SparkLabel />} label="AI Instructions">
-                  <textarea className="rdb-input min-h-16" maxLength={300} value={roomSetup.aiInstructions} onChange={(event) => updateRoomSetup('aiInstructions', event.target.value)} placeholder="beat style, sample rule, mood..." />
-                </LabeledField>
+                {[
+                  { value: 'easy', icon: '🌱', label: 'Easy', desc: 'Simple structure, common BPM, basic restrictions' },
+                  { value: 'medium', icon: '🔥', label: 'Medium', desc: 'Mixed genres, moderate restrictions' },
+                  { value: 'hard', icon: '⚔️', label: 'Hard', desc: 'Uncommon genres, edge BPM, challenging restrictions' },
+                  { value: 'expert', icon: '💀', label: 'Expert', desc: 'Extreme BPM, creative restrictions, complex mood' },
+                  { value: 'impossible', icon: '👹', label: 'Impossible', desc: 'Avant-garde mood, extreme tempo, chaotic restrictions' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${roomSetup.soloDifficulty === opt.value ? 'border-rdb-orange bg-rdb-orange/10' : 'border-rdb-border bg-rdb-bg/40 hover:border-rdb-orange/50'}`}
+                    onClick={() => { playUiSound('click'); updateRoomSetup('soloDifficulty', opt.value); }}
+                  >
+                    <span className="text-xl leading-none">{opt.icon}</span>
+                    <div>
+                      <div className="font-mono text-[12px] font-bold uppercase text-rdb-text">{opt.label}</div>
+                      <div className="mt-0.5 font-mono text-[10px] uppercase text-rdb-muted">{opt.desc}</div>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
             <div className="grid gap-2 self-stretch">
               <button className="apple-primary-action" disabled={status === 'busy' || Boolean(ownQueuedRow)} type="button" onClick={startSoloSession}>
                 {ownQueuedRow ? 'In Queue' : status === 'busy' ? 'Creating...' : 'Start Solo Session'}
+              </button>
+              <button className="rdb-button" type="button" onClick={() => {
+                const difficulties = ['easy', 'medium', 'hard', 'expert', 'impossible'];
+                playUiSound('click');
+                updateRoomSetup('soloDifficulty', difficulties[Math.floor(Math.random() * difficulties.length)]);
+              }}>
+                <Wand2 size={14} /> Surprise Me
               </button>
             </div>
           </div>
@@ -584,13 +562,33 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
               </div>
               {ownQueuedRow ? (
                 <div className="mt-4 flex flex-col items-center gap-3 py-6">
-                  <div className="font-mono text-[11px] uppercase text-rdb-orange blink">Searching for players...</div>
-                  <div className="font-mono text-[10px] uppercase text-rdb-muted">
-                    <ElapsedTimer queuedAt={queuedAt || Date.now()} />
-                  </div>
-                  <div className="mt-1 h-1 w-full max-w-[200px] overflow-hidden rounded-full bg-white/10">
-                    <div className="h-full w-1/3 animate-pulse rounded-full bg-rdb-orange" />
-                  </div>
+                  {isOvertime ? (
+                    <>
+                      <div className="font-mono text-[11px] uppercase text-rdb-orange">Overtime — {Math.ceil(overtimeRemaining / 1000)}s</div>
+                      <div className="font-mono text-[10px] uppercase text-rdb-muted">Waiting for more players</div>
+                      <div className="mt-1 h-1 w-full max-w-[200px] overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full animate-pulse rounded-full bg-rdb-orange" style={{ width: `${(1 - overtimeRemaining / (OVERTIME_SECONDS * 1000)) * 100}%` }} />
+                      </div>
+                    </>
+                  ) : sameTierWaiting.length >= 2 ? (
+                    <>
+                      <div className="font-mono text-[11px] uppercase text-green-400">Match found!</div>
+                      <div className="font-mono text-[10px] uppercase text-rdb-muted">Starting match...</div>
+                      <div className="mt-1 h-1 w-full max-w-[200px] overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full w-full animate-pulse rounded-full bg-green-400" />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-mono text-[11px] uppercase text-rdb-orange blink">Searching for players...</div>
+                      <div className="font-mono text-[10px] uppercase text-rdb-muted">
+                        <ElapsedTimer queuedAt={queuedAt || Date.now()} />
+                      </div>
+                      <div className="mt-1 h-1 w-full max-w-[200px] overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full w-1/3 animate-pulse rounded-full bg-rdb-orange" />
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="mt-4 font-mono text-[11px] uppercase text-rdb-muted text-center py-8">
@@ -609,23 +607,18 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
           <div className="mt-6 grid gap-4 md:grid-cols-[1fr_290px]">
             <div className="rounded-lg border border-rdb-border bg-rdb-bg/70 p-3">
               <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-rdb-text"><Users size={15} />Room Match</div>
-              <div className="mb-3 flex gap-2">
-                <input className="rdb-input" placeholder="ROOM CODE" value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} />
-                <button className="rdb-button" disabled={status === 'busy' || Boolean(ownQueuedRow)} type="button" onClick={joinRoomByCode}><KeyRound size={14} />JOIN</button>
-              </div>
               <div className="grid gap-2 max-h-[400px] overflow-y-auto pr-1">
                 {visibleRooms.map((room) => (
                   <div className="grid gap-2 rounded-lg border border-rdb-border bg-rdb-surface p-3" key={room.id}>
                     <span>
                       <span className="block font-mono text-[12px] uppercase text-rdb-text">{room.name}</span>
-                      <span className="block font-mono text-[10px] uppercase text-rdb-muted">{room.mode || 'quick'} — {room.status}{room.min_rank_tier && room.min_rank_tier !== 'bronze' ? ` — MIN ${room.min_rank_tier.toUpperCase()}` : ''}</span>
+                      <span className="block font-mono text-[10px] uppercase text-rdb-muted">{room.battles?.status || room.status}</span>
                     </span>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-[11px] uppercase text-rdb-muted">{formatNumber(room.room_members?.[0]?.count || room.current_players || 0)}/{formatNumber(room.max_players || 4)}</span>
                       <div className="flex items-center gap-2">
-                        {room.code_only && <span className="font-mono text-[10px] uppercase text-rdb-orange">CODE</span>}
                         {room.owner_id === profile?.id && <button className="rdb-button" disabled={status === 'busy'} type="button" onClick={() => removeRoom(room)}>REMOVE</button>}
-                        <button className="rdb-button rdb-button-primary" disabled={status === 'busy' || Boolean(ownQueuedRow) || room.status === 'locked'} type="button" onClick={() => joinRoom(room)}>JOIN</button>
+                        <button className="rdb-button rdb-button-primary" disabled={status === 'busy' || Boolean(ownQueuedRow)} type="button" onClick={() => joinRoom(room)}>JOIN</button>
                       </div>
                     </div>
                   </div>
@@ -647,8 +640,8 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
                     <input className="rdb-input" min="1" type="number" value={roomSetup.battleMinutes} onChange={(event) => updateRoomSetup('battleMinutes', event.target.value)} />
                   </LabeledField>
                 </div>
-                <LabeledField icon={<Music size={13} />} label="Song Length Sec">
-                  <input className="rdb-input" min="15" max="240" type="number" value={roomSetup.songLengthSeconds} onChange={(event) => updateRoomSetup('songLengthSeconds', event.target.value)} />
+                <LabeledField icon={<Music size={13} />} label="Song Length Sec (10000 = ∞)">
+                  <input className="rdb-input" min="15" type="number" value={roomSetup.songLengthSeconds} onChange={(event) => updateRoomSetup('songLengthSeconds', event.target.value)} />
                 </LabeledField>
                 <LabeledField icon={<Timer size={13} />} label="Voting Min">
                   <input className="rdb-input" min="1" max="60" type="number" value={roomSetup.votingMinutes} onChange={(event) => updateRoomSetup('votingMinutes', event.target.value)} />
@@ -656,15 +649,6 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
                 <LabeledField icon={<SparkLabel />} label="AI Instructions">
                   <textarea className="rdb-input min-h-20" maxLength={300} value={roomSetup.aiInstructions} onChange={(event) => updateRoomSetup('aiInstructions', event.target.value)} placeholder="beat style, sample rule, mood..." />
                 </LabeledField>
-                <LabeledField icon={<LockKeyhole size={13} />} label="Min Tier Rank">
-                  <select className="rdb-input" value={roomSetup.minRankTier} onChange={(event) => updateRoomSetup('minRankTier', event.target.value)}>
-                    {TIER_ORDER.map((tier) => <option key={tier} value={tier}>{tier.toUpperCase()}</option>)}
-                  </select>
-                </LabeledField>
-                <label className="flex items-center justify-between gap-3 border border-rdb-border bg-rdb-bg/60 p-2 font-mono text-[11px] uppercase text-rdb-muted">
-                  <span className="inline-flex items-center gap-2"><KeyRound size={13} />Code Only</span>
-                  <input type="checkbox" checked={roomSetup.codeOnly} onChange={(event) => updateRoomSetup('codeOnly', event.target.checked)} />
-                </label>
                 <label className="flex items-center justify-between gap-3 border border-rdb-border bg-rdb-bg/60 p-2 font-mono text-[11px] uppercase text-rdb-muted">
                   <span className="inline-flex items-center gap-2"><Globe2 size={13} />Public</span>
                   <input type="checkbox" checked={roomSetup.isPublic} onChange={(event) => updateRoomSetup('isPublic', event.target.checked)} />
@@ -686,18 +670,14 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
 }
 
 function normalizeRoomSetup(setup) {
-  const codeOnly = Boolean(setup.codeOnly);
   return {
     name: String(setup.name || 'PRIVATE STUDIO').trim().slice(0, 40).toUpperCase(),
-    battleStartSeconds: clamp(Number(setup.battleStartSeconds), 0, 600), // Max 10 minutes for start delay
-    battleMinutes: clamp(Number(setup.battleMinutes), 1, Number.MAX_SAFE_INTEGER), // Min 1 minute, effectively infinite max
-    songLengthSeconds: clamp(Number(setup.songLengthSeconds), 15, 240),
+    battleStartSeconds: clamp(Number(setup.battleStartSeconds), 0, 600),
+    battleMinutes: clamp(Number(setup.battleMinutes), 1, Number.MAX_SAFE_INTEGER),
+    songLengthSeconds: clamp(Number(setup.songLengthSeconds), 15, 10000),
     votingMinutes: clamp(Number(setup.votingMinutes), 1, 60),
     aiInstructions: String(setup.aiInstructions || '').trim().slice(0, 300),
-    minRankTier: TIER_ORDER.includes(setup.minRankTier) ? setup.minRankTier : 'bronze',
-    codeOnly,
     isPublic: Boolean(setup.isPublic),
-    joinCode: codeOnly ? makeRoomCode() : null,
   };
 }
 
@@ -715,14 +695,6 @@ function formatNumber(n) {
 function clamp(value, min, max) {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.round(value)));
-}
-
-function makeRoomCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
-}
-
-function canJoinTier(userTier = 'bronze', minTier = 'bronze') {
-  return TIER_ORDER.indexOf(String(userTier || 'bronze').toLowerCase()) >= TIER_ORDER.indexOf(String(minTier || 'bronze').toLowerCase());
 }
 
 function LabeledField({ icon, label, children }) {

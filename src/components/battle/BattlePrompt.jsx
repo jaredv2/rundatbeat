@@ -9,7 +9,7 @@ export default function BattlePrompt({ battle }) {
       <div className="flex flex-wrap gap-2">
         <TagBadge>{battle.genre}</TagBadge>
         <TagBadge tone="blue">{battle.bpm} BPM</TagBadge>
-        <TagBadge tone="blue">{battle.song_length_seconds || 60}s SONG</TagBadge>
+        <TagBadge tone="blue">{battle.song_length_seconds >= 10000 ? '∞' : `${battle.song_length_seconds || 60}s`} SONG</TagBadge>
         <TagBadge>{battle.mood}</TagBadge>
         {battle.is_premium && <TagBadge tone="blue">LOCK {battle.entry_fee_tokens} RDB</TagBadge>}
       </div>
