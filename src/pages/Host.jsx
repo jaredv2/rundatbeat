@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { generateBattlePrompt } from '../lib/groq';
+import { generateBattlePrompt, GENRE_KNOWLEDGE } from '../lib/groq';
+import { pickRestrictions, validatePrompt, selectGenre } from '../lib/restrictions';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
 import { playUiSound } from '../lib/sfx';
 
 const HOST_DIRECTIVE = [
-  'Generate a complete beat battle prompt with no user-supplied fields.',
-  'Pick one producer battle lane from trap, jersey club, jerk, or drill.',
-  'Use a playable BPM for the chosen lane and give producers one sharp audible limitation (vibe rule, arrangement rule — not production constraints like drum kits or instrument count).',
+  'Generate a complete beat battle prompt.',
+  'Use a playable BPM for the chosen genre and give producers one sharp audible limitation (vibe rule, arrangement rule).',
   'Make the title short, aggressive, memorable, matched to the beat type, and ending with TYPE BEAT.',
   'Use reference_keywords (not artist names) — searchable YouTube phrases like "dark 808 trap beat".',
   'flavor_text must start with "Make a beat" and use simple plain words.',
@@ -33,19 +33,39 @@ export default function Host() {
     try {
       const recentGenres = (() => { try { return JSON.parse(localStorage.getItem('rdb_recent_genres') || '[]'); } catch { return []; } })();
       const difficulty = ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)];
-      const { json } = await generateBattlePrompt({ directive: HOST_DIRECTIVE, mode: 'quick', recentGenres, difficulty });
-      try { localStorage.setItem('rdb_recent_genres', JSON.stringify([json.genre, ...recentGenres].slice(0, 6))); } catch {}
+      const genre = await selectGenre(supabase, difficulty);
+      const restrictions = pickRestrictions(difficulty, genre, 3);
+      const genreDirective = `Generate a ${genre} beat battle prompt. The genre must be ${genre}. Make the title match the genre and end with TYPE BEAT. Only generate the title, mood, flavor_text, and reference_keywords. Do NOT generate restrictions.`;
+      const { json } = await generateBattlePrompt({ directive: genreDirective, mode: 'quick', recentGenres, difficulty });
+      const validation = validatePrompt(json);
+      if (!validation.valid) {
+        const retry = await generateBattlePrompt({ directive: genreDirective, mode: 'quick', recentGenres, difficulty });
+        const retryValidation = validatePrompt(retry.json);
+        if (!retryValidation.valid) throw new Error(`Prompt validation failed: ${retryValidation.errors.join('; ')}`);
+        json.title = retry.json.title;
+        json.flavor_text = retry.json.flavor_text;
+        json.mood = retry.json.mood;
+        json.reference_keywords = retry.json.reference_keywords;
+      }
+      try { localStorage.setItem('rdb_recent_genres', JSON.stringify([genre, ...recentGenres].slice(0, 6))); } catch {}
+      const bpmClamped = (() => {
+        const g = GENRE_KNOWLEDGE[genre];
+        if (!g) return Number(json.bpm) || 140;
+        const [min, max] = g.bpm_range;
+        const bpm = Number(json.bpm);
+        return bpm >= min && bpm <= max ? bpm : Math.floor((min + max) / 2);
+      })();
       const starts = new Date(Date.now() + 5 * 60 * 1000);
       const duration = 60;
       const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
       const { data, error: insertError } = await supabase.from('battles').insert({
         title: json.title,
         prompt_text: json.flavor_text,
-        genre: json.genre,
-        bpm: Number(json.bpm),
+        genre,
+        bpm: bpmClamped,
         mood: json.mood,
-        restrictions: json.restrictions,
-        reference_artists: Array.isArray(json.reference_keywords) ? json.reference_keywords : Array.isArray(json.reference_artists) ? json.reference_artists : [],
+        restrictions: restrictions.join('; '),
+        reference_artists: Array.isArray(json.reference_keywords) ? json.reference_keywords : [],
         flavor_text: json.flavor_text,
         duration_minutes: duration,
         mode: 'quick',

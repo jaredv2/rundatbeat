@@ -1,25 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Clock, Globe2, Music, Timer, Users, Wand2, X } from 'lucide-react';
-import { generateBattlePrompt, difficultyFromTier } from '../../lib/groq';
+import { generateBattlePrompt, difficultyFromTier, GENRE_KNOWLEDGE } from '../../lib/groq';
+import { pickRestrictions, validatePrompt, selectGenre } from '../../lib/restrictions';
 import { playUiSound } from '../../lib/sfx';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
-
-const QUEUE_DIRECTIVE = [
-  'Generate a producer beat battle prompt for an automatically matched room.',
-  'Pick a current competitive beat lane and make the title match that lane.',
-  'The title must end with TYPE BEAT.',
-  'Make the restrictions fair, audible in the final beat, and easy for voters to judge.',
-].join(' ');
-
-const SOLO_DIRECTIVE = [
-  'Generate a solo producer beat battle prompt for a practice session.',
-  'Pick a current competitive beat lane and make the title match that lane.',
-  'The title must end with TYPE BEAT.',
-  'Make the restrictions fair, audible in the final beat, and easy for voters to judge.',
-].join(' ');
 
 const OVERTIME_SECONDS = 20;
 
@@ -332,17 +319,34 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
   async function createAiBattleRoom({ mode, ownerId, members, queueId = null, roomName, setup = null, difficultyOverride = null }) {
     const isRanked = mode === 'ranked';
     const normalizedSetup = setup ? normalizeRoomSetup(setup) : null;
-    const directive = mode === 'solo' ? SOLO_DIRECTIVE : QUEUE_DIRECTIVE;
-    const customDirective = normalizedSetup?.aiInstructions
-      ? `${directive} Host custom instructions: ${normalizedSetup.aiInstructions}. Keep it concise and enforce the host's instruction.`
-      : directive;
 
     const difficulty = difficultyOverride || (isRanked
       ? difficultyFromTier(profile?.rank_tier)
       : ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)]);
+    const genre = await selectGenre(supabase, difficulty);
+    const restrictions = pickRestrictions(difficulty, genre, 3);
+    const genreDirective = `Generate a ${genre} beat battle prompt for a${mode === 'solo' ? ' solo practice session' : 'n automatically matched room'}. The genre must be ${genre}. Make the title match the genre and end with TYPE BEAT. Only generate the title, mood, flavor_text, and reference_keywords. Do NOT generate restrictions.${normalizedSetup?.aiInstructions ? ` Host custom instructions: ${normalizedSetup.aiInstructions}.` : ''}`;
     const recentGenres = (() => { try { return JSON.parse(localStorage.getItem('rdb_recent_genres') || '[]'); } catch { return []; } })();
-    const { json } = await generateBattlePrompt({ directive: customDirective, mode, recentGenres, difficulty });
-    try { localStorage.setItem('rdb_recent_genres', JSON.stringify([json.genre, ...recentGenres].slice(0, 6))); } catch {}
+    const { json } = await generateBattlePrompt({ directive: genreDirective, mode, recentGenres, difficulty });
+    const validation = validatePrompt(json);
+    if (!validation.valid) {
+      const retry = await generateBattlePrompt({ directive: genreDirective, mode, recentGenres, difficulty });
+      const retryValidation = validatePrompt(retry.json);
+      if (!retryValidation.valid) throw new Error(`Prompt validation failed: ${retryValidation.errors.join('; ')}`);
+      json.title = retry.json.title;
+      json.flavor_text = retry.json.flavor_text;
+      json.mood = retry.json.mood;
+      json.reference_keywords = retry.json.reference_keywords;
+    }
+    try { localStorage.setItem('rdb_recent_genres', JSON.stringify([genre, ...recentGenres].slice(0, 6))); } catch {}
+
+    const bpmClamped = (() => {
+      const g = GENRE_KNOWLEDGE[genre];
+      if (!g) return Number(json.bpm) || 140;
+      const [min, max] = g.bpm_range;
+      const bpm = Number(json.bpm);
+      return bpm >= min && bpm <= max ? bpm : Math.floor((min + max) / 2);
+    })();
 
     const startDelay = normalizedSetup?.battleStartSeconds || (isRanked ? 60 : 0);
     const starts = new Date(Date.now() + startDelay * 1000);
@@ -352,11 +356,11 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     const { data: battle, error: battleError } = await supabase.from('battles').insert({
       title: json.title,
       prompt_text: json.flavor_text,
-      genre: json.genre,
-      bpm: Number(json.bpm),
+      genre,
+      bpm: bpmClamped,
       mood: json.mood,
-      restrictions: json.restrictions,
-      reference_artists: Array.isArray(json.reference_keywords) ? json.reference_keywords : Array.isArray(json.reference_artists) ? json.reference_artists : [],
+      restrictions: restrictions.join('; '),
+      reference_artists: Array.isArray(json.reference_keywords) ? json.reference_keywords : [],
       flavor_text: json.flavor_text,
       duration_minutes: duration,
       song_length_seconds: normalizedSetup?.songLengthSeconds || 60,
