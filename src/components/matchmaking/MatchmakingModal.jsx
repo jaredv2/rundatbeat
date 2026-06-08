@@ -125,36 +125,13 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     setVotingRooms(data || []);
   }
 
-  async function cleanupStaleData() {
-    try {
-      const { data: closedRooms } = await supabase
-        .from('rooms')
-        .select('id, battle_id')
-        .eq('status', 'closed');
-      const closedIds = (closedRooms || []).map(r => r.id);
-      const battleIds = (closedRooms || []).map(r => r.battle_id).filter(Boolean);
-      if (closedIds.length > 0) {
-        await Promise.all([
-          supabase.from('room_members').delete().in('room_id', closedIds),
-          supabase.from('room_messages').delete().in('room_id', closedIds),
-        ]);
-        await supabase.from('rooms').delete().in('id', closedIds);
-      }
-      if (battleIds.length > 0) {
-        await supabase.from('battles').delete().in('id', battleIds);
-      }
-      await supabase.from('matchmaking_queue').delete().in('status', ['cancelled', 'matched']);
-    } catch (err) {
-      console.error('[cleanup] error:', err);
-    }
-  }
-
   async function enterQueue() {
     if (!profile || status === 'busy') return;
     console.log('[mm] enterQueue — profile:', profile.id.slice(0, 8), 'tier:', profile.rank_tier);
     setStatus('busy');
     setMatchFound(false);
-    await cleanupStaleData();
+    console.log('[cleanup] triggering edge function from enterQueue');
+    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
     try {
       // Check existing queue entry (clean stale groups first)
       const { data: existingAny } = await supabase
@@ -432,6 +409,8 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     playUiSound('click');
     if (!profile || status === 'busy') return;
     setStatus('busy');
+    console.log('[cleanup] triggering edge function from joinRoom');
+    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
     try {
       if (room.mode === 'ranked' && room.status === 'voting') {
         await supabase.from('room_members').upsert({ room_id: room.id, user_id: profile.id, role: 'member' });
@@ -457,6 +436,8 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     playUiSound('click');
     if (!profile || status === 'busy') return;
     setStatus('busy');
+    console.log('[cleanup] triggering edge function from createRoomBattle');
+    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
     try {
       const setup = normalizeRoomSetup(roomSetup);
       const { battle } = await createAiBattleRoom({
@@ -479,6 +460,8 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     playUiSound('click');
     if (!profile || status === 'busy') return;
     setStatus('busy');
+    console.log('[cleanup] triggering edge function from startSoloSession');
+    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
     try {
       const s = roomSetup;
       const parts = ['Generate a solo producer beat battle prompt for a practice session.', 'Pick a current competitive beat lane and make the title match that lane.', 'The title must end with TYPE BEAT.', 'Make the restrictions fair, audible in the final beat, and easy for voters to judge.'];

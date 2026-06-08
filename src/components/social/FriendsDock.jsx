@@ -250,6 +250,8 @@ export default function FriendsDock() {
   }
 
   async function createChallengeBattle(challengeId, userId1, userId2) {
+    console.log('[cleanup] triggering edge function from createChallengeBattle');
+    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
     try {
       const diff = ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)];
       const genre = Object.keys(GENRE_KNOWLEDGE)[Math.floor(Math.random() * Object.keys(GENRE_KNOWLEDGE).length)];
@@ -434,11 +436,13 @@ export default function FriendsDock() {
                   const online = isOnline(friend.id);
                   const unread = unreadByFriend[friend.id] || 0;
                   return (
-                    <button
-                      className={`relative flex items-center gap-2 rounded-md border px-2 py-2 text-left ${selectedFriendId === friend.id ? 'border-rdb-orange bg-rdb-surface' : 'border-rdb-border bg-rdb-bg'}`}
+                    <div
+                      className={`relative flex cursor-pointer items-center gap-2 rounded-md border px-2 py-2 text-left ${selectedFriendId === friend.id ? 'border-rdb-orange bg-rdb-surface' : 'border-rdb-border bg-rdb-bg'}`}
                       key={friend.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => selectFriend(friend.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') selectFriend(friend.id); }}
                     >
                       <div className="relative shrink-0">
                         {friend.avatar_url ? <img className="h-8 w-8 rounded-md object-cover" src={friend.avatar_url} alt="" /> : <div className="h-8 w-8 rounded-md bg-rdb-surface" />}
@@ -467,7 +471,7 @@ export default function FriendsDock() {
                         })()}
                         <Link className="font-mono text-[9px] uppercase text-rdb-muted hover:text-rdb-orange" to={`/profile/${friend.username}`} onClick={(e) => e.stopPropagation()}>VIEW</Link>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
                 {!friends.length && <div className="rounded-md border border-rdb-border bg-rdb-bg p-3 font-mono text-[11px] uppercase text-rdb-muted">No friends yet.</div>}

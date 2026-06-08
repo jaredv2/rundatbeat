@@ -318,6 +318,8 @@ export default function Battle() {
   async function leaveRoom() {
     if (!profile || !room || leavingRoom) return;
     playUiSound('cancel');
+    console.log('[cleanup] triggering edge function from leaveRoom');
+    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
 
     const isRanked = room.mode === 'ranked';
     if (isRanked) {
