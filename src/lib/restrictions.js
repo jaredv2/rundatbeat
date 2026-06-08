@@ -83,9 +83,9 @@ export function validatePrompt(json) {
 
 export async function selectGenre(supabase, difficulty) {
   const candidates = {
-    easy: ['trap'],
-    medium: ['trap', 'drill'],
-    hard: ['drill', 'jersey_club'],
+    easy: ['trap', 'drill', 'jersey_club'],
+    medium: ['trap', 'drill', 'jersey_club'],
+    hard: ['drill', 'jersey_club', 'jerk'],
     very_hard: ['jersey_club', 'jerk'],
   };
   const pool = candidates[difficulty] || ['trap'];

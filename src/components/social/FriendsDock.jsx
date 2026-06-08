@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useFriends } from '../../hooks/useFriends';
 import { generateBattlePrompt, GENRE_KNOWLEDGE } from '../../lib/groq';
-import { pickRestrictions, selectGenre } from '../../lib/restrictions';
+import { pickRestrictions } from '../../lib/restrictions';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useFriendStore } from '../../store/friendStore';
@@ -252,7 +252,7 @@ export default function FriendsDock() {
   async function createChallengeBattle(challengeId, userId1, userId2) {
     try {
       const diff = ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)];
-      const genre = await selectGenre(supabase, diff);
+      const genre = Object.keys(GENRE_KNOWLEDGE)[Math.floor(Math.random() * Object.keys(GENRE_KNOWLEDGE).length)];
       const restrictions = pickRestrictions(diff, genre, 3);
       const directive = `Generate a ${genre} beat battle prompt for a 1v1 challenge match. The genre must be ${genre}. Make the title end with TYPE BEAT. Only generate the title, mood, flavor_text, and reference_keywords. Do NOT generate restrictions.`;
       const { json } = await generateBattlePrompt({ directive, mode: 'quick', recentGenres: [], difficulty: diff });

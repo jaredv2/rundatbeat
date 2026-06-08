@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { computeNewElos, DEFAULT_ELO } from '../lib/elo';
+import { computeNewElos, DEFAULT_ELO, tierFromElo } from '../lib/elo';
 
 const DEFAULT_VOTING_MINUTES = 3;
 // How often the owner's FSM tick fires (ms). Keep it reasonable — realtime
@@ -297,6 +297,7 @@ async function advanceToClosed(battleId, roomId) {
             const isFirst = ranking[u.user_id] === 1;
             return supabase.from('profiles').update({
               elo: u.newElo,
+              rank_tier: tierFromElo(u.newElo),
               wins: (profile?.wins || 0) + (isFirst ? 1 : 0),
               battles_entered: (profile?.battles_entered || 0) + 1,
               ranked_wins: (profile?.ranked_wins || 0) + (isFirst ? 1 : 0),

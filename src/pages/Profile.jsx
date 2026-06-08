@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, BadgeCheck, Calendar, Edit3, Save, Settings, Shirt, Swords, Trophy } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, Calendar, Edit3, Save, Settings, Shirt, Trophy } from 'lucide-react';
 import WaveformPlayer from '../components/audio/WaveformPlayer';
 import AddFriendButton from '../components/social/AddFriendButton';
 import ReportButton from '../components/social/ReportButton';
@@ -18,7 +18,6 @@ export default function Profile() {
   const addToast = useUiStore((s) => s.addToast);
   const [profile, setProfile] = useState(null);
   const [submissions, setSubmissions] = useState([]);
-  const [mode, setMode] = useState('quick');
   const [editing, setEditing] = useState(false);
   const [description, setDescription] = useState('');
   const customBadge = useMemo(() => (
@@ -97,29 +96,19 @@ export default function Profile() {
                 <div className="mt-1 flex items-center justify-center gap-1 font-mono text-[11px] uppercase text-rdb-muted sm:justify-start"><Calendar size={12} />JOINED {joined}</div>
                 <div className="mt-5 flex flex-wrap justify-center gap-2 sm:justify-start">
                   <RankBadge tier={profile.rank_tier} />
-                  <span className="inline-flex items-center gap-1 border border-rdb-border px-2 py-1 font-mono text-xs uppercase text-rdb-muted"><Trophy size={12} />LEVEL {Math.max(1, Math.floor((profile.points || 0) / 250) + 1)}</span>
+                  <span className="inline-flex items-center gap-1 border border-rdb-border px-2 py-1 font-mono text-xs uppercase text-rdb-muted"><Trophy size={12} />{profile.elo || 1000} ELO</span>
                 </div>
               </div>
             </div>
           </div>
 
-          <aside className="bg-rdb-bg/20" style={{ border: '1px solid var(--profile-accent, var(--color-rdb-border))' }}>
-            <div className="grid grid-cols-2 font-mono text-[11px] uppercase" style={{ borderBottom: '1px solid var(--profile-accent, var(--color-rdb-border))' }}>
-              <button className={`py-2 transition-colors ${mode === 'quick' ? 'text-rdb-bg' : 'text-rdb-muted'}`} style={mode === 'quick' ? { background: 'var(--profile-accent)' } : {}} type="button" onClick={() => setMode('quick')}>QUICK BATTLE</button>
-              <button className={`py-2 transition-colors ${mode === 'ranked' ? 'text-rdb-bg' : 'text-rdb-muted'}`} style={mode === 'ranked' ? { background: 'var(--profile-accent)' } : {}} type="button" onClick={() => setMode('ranked')}>RANKED</button>
+          <aside className="bg-rdb-bg/20 p-4" style={{ border: '1px solid var(--profile-accent, var(--color-rdb-border))' }}>
+            <div className="grid min-h-[140px] place-items-center gap-3 text-center font-mono uppercase">
+              <StatBlock value={profile.elo || 1000} label="ELO" />
+              <StatBlock value={rankedWins} label="RANKED WINS" />
+              <StatBlock value={rankedLosses} label="RANKED LOSSES" />
+              <StatBlock value={rankedRate} label="RANKED WIN RATE" suffix="%" />
             </div>
-            {mode === 'quick' ? (
-              <div className="grid min-h-[140px] place-items-center gap-3 p-4 text-center font-mono uppercase">
-                <StatBlock value={profile.wins || 0} label="WINS" />
-                <StatBlock value={profile.battles_entered || 0} label="PLAYED" />
-                <StatBlock value={winRate} label="WIN RATE" suffix="%" />
-              </div>
-            ) : (
-              <div className="grid min-h-[140px] place-items-center gap-3 p-4 text-center font-mono uppercase">
-                <StatBlock value={(profile.rank_tier || 'bronze').toUpperCase()} label="TIER" />
-                <StatBlock value={rankedRate} label="WIN RATE" suffix="%" />
-              </div>
-            )}
           </aside>
         </div>
 
@@ -141,13 +130,6 @@ export default function Profile() {
         ) : (
           <p className="font-mono text-[12px] text-rdb-muted">{profile.description || 'No description yet. Click Edit to add one.'}</p>
         )}
-      </section>
-
-      <section className="mx-auto grid max-w-[760px] gap-3 sm:grid-cols-2 md:grid-cols-4">
-        <GameStat label="Quick Win Rate" value={`${winRate}%`} />
-        <GameStat label="Ranked Record" value={`${rankedWins}-${rankedLosses}`} />
-        <GameStat label="Points" value={formatNumber(profile.points)} />
-        <GameStat label="Earned" value={`${formatNumber(profile.total_tokens_earned)} RDB`} />
       </section>
 
       <section className="mx-auto max-w-[860px]">
@@ -217,13 +199,4 @@ export default function Profile() {
 function StatBlock({ value, label, suffix = '' }) {
   const displayValue = typeof value === 'number' ? formatNumber(value) : value;
   return <div><div className="text-3xl text-rdb-text">{displayValue}{suffix}</div><div className="text-[11px] text-rdb-muted">{label}</div></div>;
-}
-
-function GameStat({ label, value }) {
-  return (
-    <div className="profile-themed-panel border border-rdb-border bg-rdb-surface p-3">
-      <div className="flex items-center gap-1 font-mono text-[11px] uppercase text-rdb-muted"><Swords size={12} />{label}</div>
-      <div className="mt-2 font-mono text-xl uppercase text-rdb-text">{value}</div>
-    </div>
-  );
 }

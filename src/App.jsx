@@ -23,6 +23,27 @@ import { useAuthStore } from './store/authStore';
 import { useUiStore } from './store/uiStore';
 import { playUiSound } from './lib/sfx';
 
+async function cleanupStaleRooms(userId) {
+  if (!supabase) return;
+  const { data: memberships } = await supabase
+    .from('room_members')
+    .select('room_id')
+    .eq('user_id', userId);
+  if (!memberships?.length) return;
+  const { data: rooms } = await supabase
+    .from('rooms')
+    .select('id')
+    .in('id', memberships.map(m => m.room_id))
+    .eq('status', 'closed');
+  if (rooms?.length) {
+    await supabase
+      .from('room_members')
+      .delete()
+      .in('room_id', rooms.map(r => r.id))
+      .eq('user_id', userId);
+  }
+}
+
 // Route → title map. Dynamic routes (/battle/:id, /profile/:username) handled separately below.
 const ROUTE_TITLES = {
   '/':            'RUNDATBEAT — HOME',
@@ -117,6 +138,7 @@ export default function App() {
           const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
           setProfile(profile);
           if (profile) {
+            cleanupStaleRooms(profile.id);
             if (['/landing', '/login', '/setup'].includes(location.pathname)) {
               navigate('/', { replace: true });
             }

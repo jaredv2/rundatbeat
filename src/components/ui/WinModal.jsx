@@ -1,10 +1,16 @@
 import { useNavigate } from 'react-router-dom';
-import { Trophy, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Trophy, X } from 'lucide-react';
 import { playUiSound } from '../../lib/sfx';
+import { tierFromElo } from '../../lib/elo';
 
-export default function WinModal({ open, eloChange, onPlayAgain, onClose }) {
+export default function WinModal({ open, eloChange, oldTier, newTier, onPlayAgain, onClose }) {
   const navigate = useNavigate();
   if (!open) return null;
+
+  const displayOld = oldTier || (eloChange !== null && tierFromElo(0));
+  const displayNew = newTier || (eloChange !== null && tierFromElo(eloChange > 0 ? eloChange : 0));
+  const rankedUp = displayOld && displayNew && displayOld !== displayNew && eloChange > 0;
+  const rankedDown = displayOld && displayNew && displayOld !== displayNew && eloChange < 0;
 
   return (
     <div className="win-modal-overlay" onClick={() => { playUiSound('cancel'); onClose(); }}>
@@ -13,9 +19,28 @@ export default function WinModal({ open, eloChange, onPlayAgain, onClose }) {
         <div className="win-modal-glow" />
         <Trophy className="win-modal-icon" size={48} />
         <h1 className="win-modal-title">YOU WIN</h1>
-        {eloChange !== undefined && (
-          <p className="win-modal-elo">+{eloChange} ELO</p>
+
+        {eloChange !== null && (
+          <p className={`win-modal-elo ${eloChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {eloChange >= 0 ? '+' : ''}{eloChange} ELO
+          </p>
         )}
+
+        {rankedUp && (
+          <p className="mt-1 flex items-center justify-center gap-2 font-mono text-[13px] uppercase text-green-400">
+            <ArrowUp size={16} />{displayOld} → {displayNew}
+          </p>
+        )}
+        {rankedDown && (
+          <p className="mt-1 flex items-center justify-center gap-2 font-mono text-[13px] uppercase text-red-400">
+            <ArrowDown size={16} />{displayOld} → {displayNew}
+          </p>
+        )}
+
+        {displayOld && displayNew && displayOld === displayNew && eloChange !== null && (
+          <p className="mt-1 font-mono text-[11px] uppercase text-rdb-muted">{displayNew}</p>
+        )}
+
         <div className="win-modal-actions">
           <button className="rdb-button" type="button" onClick={() => { playUiSound('click'); navigate('/leaderboard'); }}>
             LEADERBOARD

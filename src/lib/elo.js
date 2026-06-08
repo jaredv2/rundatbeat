@@ -2,6 +2,23 @@ export const DEFAULT_ELO = 1000;
 
 const K = 32;
 
+const TIER_THRESHOLDS = [
+  { elo: 2100, tier: 'goat' },
+  { elo: 1800, tier: 'champion' },
+  { elo: 1600, tier: 'elite' },
+  { elo: 1400, tier: 'diamond' },
+  { elo: 1250, tier: 'platinum' },
+  { elo: 1100, tier: 'gold' },
+  { elo: 900,  tier: 'silver' },
+];
+
+export function tierFromElo(elo) {
+  for (const t of TIER_THRESHOLDS) {
+    if (elo >= t.elo) return t.tier;
+  }
+  return 'bronze';
+}
+
 export function expectedScore(ratingA, ratingB) {
   return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
 }

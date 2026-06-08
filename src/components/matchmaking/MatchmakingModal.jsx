@@ -8,8 +8,6 @@ import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useUiStore } from '../../store/uiStore';
 
-const MATCHMAKING_FN = 'process-matchmaking';
-
 const DEFAULT_ROOM_SETUP = {
   name: 'PRIVATE STUDIO',
   battleStartSeconds: 60,
@@ -28,6 +26,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
   const [tab, setTab] = useState('ranked');
   const [queueRows, setQueueRows] = useState([]);
   const [rooms, setRooms] = useState([]);
+  const [votingRooms, setVotingRooms] = useState([]);
   const [roomSetup, setRoomSetup] = useState(DEFAULT_ROOM_SETUP);
   const [status, setStatus] = useState('idle');
   const [queuedAt, setQueuedAt] = useState(null);
@@ -40,7 +39,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
   const tier = profile?.rank_tier || 'bronze';
 
   const sameTierWaiting = useMemo(
-    () => waitingRows.filter((r) => (r.profiles?.rank_tier || 'bronze') === tier),
+    () => waitingRows.filter((r) => (r.tier || 'bronze') === tier),
     [waitingRows, tier],
   );
 
@@ -49,6 +48,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     setMatchFound(false);
     loadQueue();
     loadRooms();
+    loadVotingRooms();
     checkForMatch();
     const interval = setInterval(() => { processMatchmaking(); checkForMatch(); }, 5000);
     const channel = supabase
@@ -98,7 +98,7 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       .eq('status', 'waiting')
       .is('group_id', null)
       .order('queued_at', { ascending: true })
-      .limit(24);
+      .limit(48);
     setQueueRows(data || []);
   }
 
@@ -113,10 +113,48 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     setRooms(data || []);
   }
 
+  async function loadVotingRooms() {
+    const { data } = await supabase
+      .from('rooms')
+      .select('*, room_members(count), battles(title, genre, status)')
+      .eq('status', 'voting')
+      .eq('mode', 'ranked')
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+      .limit(12);
+    setVotingRooms(data || []);
+  }
+
+  async function cleanupStaleData() {
+    try {
+      const { data: closedRooms } = await supabase
+        .from('rooms')
+        .select('id, battle_id')
+        .eq('status', 'closed');
+      const closedIds = (closedRooms || []).map(r => r.id);
+      const battleIds = (closedRooms || []).map(r => r.battle_id).filter(Boolean);
+      if (closedIds.length > 0) {
+        await Promise.all([
+          supabase.from('room_members').delete().in('room_id', closedIds),
+          supabase.from('room_messages').delete().in('room_id', closedIds),
+        ]);
+        await supabase.from('rooms').delete().in('id', closedIds);
+      }
+      if (battleIds.length > 0) {
+        await supabase.from('battles').delete().in('id', battleIds);
+      }
+      await supabase.from('matchmaking_queue').delete().in('status', ['cancelled', 'matched']);
+    } catch (err) {
+      console.error('[cleanup] error:', err);
+    }
+  }
+
   async function enterQueue() {
     if (!profile || status === 'busy') return;
+    console.log('[mm] enterQueue — profile:', profile.id.slice(0, 8), 'tier:', profile.rank_tier);
     setStatus('busy');
     setMatchFound(false);
+    await cleanupStaleData();
     try {
       // Check existing queue entry (clean stale groups first)
       const { data: existingAny } = await supabase
@@ -147,8 +185,9 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
       const elo = profile.elo || 1000;
 
       await supabase.from('matchmaking_queue').insert({
-        user_id: profile.id, mode: 'ranked', elo,
+        user_id: profile.id, mode: 'ranked', elo, tier: profile.rank_tier || 'bronze',
       });
+      console.log('[mm] queued successfully');
       await loadQueue();
       playUiSound('queue');
       addToast('QUEUED');
@@ -190,23 +229,94 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
 
   async function processMatchmaking() {
     if (!profile || status !== 'idle') return;
-    const myEntry = queueRows.find((row) => row.user_id === profile.id && row.status === 'waiting');
-    if (!myEntry) return;
 
-    setStatus('busy');
+    const myTier = profile.rank_tier || 'bronze';
+    let groupId = null;
+
     try {
-      const { data, error } = await supabase.functions.invoke(MATCHMAKING_FN);
-      if (error) throw error;
-      if (data?.matched && data?.battle_id) {
-        supabase.from('matchmaking_queue').delete().eq('user_id', profile.id).eq('status', 'matched').then(() => {});
-        setMatchFound(true);
-        playUiSound('success');
-        addToast('MATCH READY');
-        onClose();
-        navigate(`/battle/${data.battle_id}`);
+      // Fetch ALL waiting ungrouped entries for my tier
+      const { data: tierEntries } = await supabase
+        .from('matchmaking_queue')
+        .select('id, user_id, queued_at')
+        .eq('mode', 'ranked')
+        .eq('status', 'waiting')
+        .is('group_id', null)
+        .eq('tier', myTier)
+        .order('queued_at', { ascending: true })
+        .limit(50);
+
+      if (!tierEntries || tierEntries.length < 2) {
+        console.log('[mm]', tierEntries?.length || 0, 'same-tier queued — need at least 2');
+        return;
       }
-    } catch {
-      // Edge function may have failed; retry on next interval
+
+      // Partition into groups of 6, last group min 2
+      const GROUP_SIZE = 6;
+      const groups = [];
+      for (let i = 0; i < tierEntries.length; i += GROUP_SIZE) {
+        const g = tierEntries.slice(i, i + GROUP_SIZE);
+        if (g.length < 2) break;
+        groups.push(g);
+      }
+
+      // Find the group containing the current user
+      const myGroup = groups.find((g) => g.some((e) => e.user_id === profile.id));
+      if (!myGroup) {
+        console.log('[mm] user not in any viable group — probably matched already');
+        loadQueue();
+        return;
+      }
+
+      console.log('[mm] group of', myGroup.length, 'player(s):', myGroup.map(e => e.user_id.slice(0, 8)));
+
+      groupId = crypto.randomUUID();
+      const ids = myGroup.map(e => e.id);
+      const userIds = myGroup.map(e => e.user_id);
+
+      const { error: claimErr } = await supabase
+        .from('matchmaking_queue')
+        .update({ group_id: groupId })
+        .in('id', ids)
+        .is('group_id', null);
+      if (claimErr) throw claimErr;
+
+      const { count } = await supabase
+        .from('matchmaking_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('group_id', groupId);
+
+      if (!count || count < ids.length) {
+        console.log('[mm] claim failed — only claimed', count, 'of', ids.length, '— another client beat us');
+        await supabase.from('matchmaking_queue').update({ group_id: null }).eq('group_id', groupId);
+        return;
+      }
+
+      console.log('[mm] claim won! creating battle for', userIds.length, 'players');
+      setStatus('busy');
+
+      const { battle } = await createAiBattleRoom({
+        mode: 'ranked',
+        members: userIds,
+        roomName: 'RANKED MATCH',
+      });
+
+      await supabase
+        .from('matchmaking_queue')
+        .update({ status: 'matched', battle_id: battle.id, matched_at: new Date().toISOString() })
+        .in('user_id', userIds)
+        .eq('status', 'waiting');
+
+      console.log('[mm] matched — navigating to', battle.id);
+      setMatchFound(true);
+      playUiSound('success');
+      addToast('MATCH READY');
+      onClose();
+      navigate(`/battle/${battle.id}`);
+    } catch (err) {
+      console.error('[mm] error:', err);
+      if (groupId) {
+        await supabase.from('matchmaking_queue').update({ group_id: null }).eq('group_id', groupId);
+      }
     } finally {
       setStatus('idle');
     }
@@ -238,7 +348,9 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     const difficulty = difficultyOverride || (isRanked
       ? difficultyFromTier(profile?.rank_tier)
       : ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)]);
-    const genre = await selectGenre(supabase, difficulty);
+    const genre = isRanked || mode === 'solo'
+      ? Object.keys(GENRE_KNOWLEDGE)[Math.floor(Math.random() * Object.keys(GENRE_KNOWLEDGE).length)]
+      : await selectGenre(supabase, difficulty);
     const restrictions = pickRestrictions(difficulty, genre, 3);
     const customInstr = normalizedSetup?.aiInstructions?.trim();
     const genreDirective = `${customInstr ? `Follow the host's instructions: ${customInstr}. ` : ''}Generate a ${genre} beat battle prompt for a${mode === 'solo' ? ' solo practice session' : ' quick room battle'}. The genre must be ${genre}. Make the title match the genre and end with TYPE BEAT. Only generate the title, mood, flavor_text, and reference_keywords. Do NOT generate restrictions.`;
@@ -321,6 +433,13 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
     if (!profile || status === 'busy') return;
     setStatus('busy');
     try {
+      if (room.mode === 'ranked' && room.status === 'voting') {
+        await supabase.from('room_members').upsert({ room_id: room.id, user_id: profile.id, role: 'member' });
+        addToast('JOINED AS VOTER');
+        onClose();
+        navigate(`/battle/${room.battle_id}`);
+        return;
+      }
       await supabase.from('room_members').upsert({ room_id: room.id, user_id: profile.id, role: room.owner_id === profile.id ? 'owner' : 'member' });
       const nextCount = Math.min(room.max_players || 4, Math.max(room.current_players || 0, (room.room_members?.[0]?.count || 0) + 1));
       await supabase.from('rooms').update({ current_players: nextCount, status: nextCount >= (room.max_players || 4) ? 'locked' : room.status }).eq('id', room.id);
@@ -509,6 +628,22 @@ export default function MatchmakingModal({ open, onClose, onQueued }) {
               </button>
               {ownWaitingRow && <button className="apple-secondary-action" disabled={status === 'busy'} type="button" onClick={cancelQueue}>Cancel Queue</button>}
             </div>
+            {votingRooms.length > 0 && (
+              <div className="mt-4 rounded-lg border border-rdb-border bg-rdb-bg/70 p-3">
+                <div className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase text-rdb-muted"><Users size={14} />Live Battles</div>
+                <div className="grid gap-2">
+                  {votingRooms.map((room) => (
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2 rounded-lg border border-rdb-border bg-rdb-surface p-3" key={room.id}>
+                      <div>
+                        <div className="font-mono text-[12px] uppercase text-rdb-text">{room.battles?.title || 'RANKED MATCH'}</div>
+                        <div className="font-mono text-[10px] uppercase text-rdb-muted">{room.battles?.genre || ''} • {room.room_members?.[0]?.count || 0} VOTERS</div>
+                      </div>
+                      <button className="rdb-button rdb-button-primary" disabled={status === 'busy' || Boolean(ownQueuedRow)} type="button" onClick={() => joinRoom(room)}>VOTE</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="mt-6 grid gap-4 md:grid-cols-[1fr_290px]">

@@ -32,7 +32,7 @@ import {
   getNameGradientStyle,
   getNameplateEmoji,
 } from '../lib/display';
-import { DEFAULT_ELO } from '../lib/elo';
+import { DEFAULT_ELO, tierFromElo } from '../lib/elo';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
@@ -136,7 +136,10 @@ export default function Battle() {
   const [showEarlyLeaveModal, setShowEarlyLeaveModal] = useState(false);
   const [showWinModal, setShowWinModal] = useState(false);
   const [winEloGain, setWinEloGain] = useState(null);
+  const [winOldTier, setWinOldTier] = useState(null);
+  const [winNewTier, setWinNewTier] = useState(null);
   const chatEndRef = useRef(null);
+  const selfLeaving = useRef(false);
 
   // ── Room state machine ────────────────────────────────────────────────────
   const { phase, phaseEndsAt, forceStart, forceClose, isOwner, isSolo } =
@@ -187,7 +190,7 @@ export default function Battle() {
     if (loading) return;
     const nowMember = members.some((m) => m.user_id === profile?.id);
     if (!wasMember.current && nowMember) wasMember.current = true;
-    if (wasMember.current && !nowMember && profile) {
+    if (wasMember.current && !nowMember && profile && !selfLeaving.current) {
       addToast('ROOM CLOSED — YOU HAVE BEEN REMOVED');
       navigate('/', { replace: true });
     }
@@ -195,6 +198,8 @@ export default function Battle() {
 
   // ── Detect win when battle closes ────────────────────────────────────────
   const wasClosed = useRef(false);
+  const oldEloRef = useRef(profile?.elo ?? DEFAULT_ELO);
+  const refreshProfile = useAuthStore((s) => s.refreshProfile);
   useEffect(() => {
     if (loading || !profile) return;
     if (phase === 'closed' && !wasClosed.current) {
@@ -202,20 +207,15 @@ export default function Battle() {
 
       if (battle?.winner_id === profile.id) {
         setShowWinModal(true);
-        // Compute ELO gain for auto-win
-        const leaverId = members.find((m) => m.user_id !== profile.id)?.user_id;
-        if (leaverId) {
-          supabase
-            .from('profiles')
-            .select('elo')
-            .in('id', [profile.id, leaverId])
-            .then(({ data }) => {
-              const winElo = (data || []).find((p) => p.id === profile.id)?.elo ?? DEFAULT_ELO;
-              const loseElo = (data || []).find((p) => p.id === leaverId)?.elo ?? DEFAULT_ELO;
-              const expected = 1 / (1 + Math.pow(10, (loseElo - winElo) / 400));
-              setWinEloGain(Math.round(32 * (1 - expected)));
-            });
-        }
+        supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle().then(({ data }) => {
+          const newEloVal = data?.elo ?? oldEloRef.current;
+          const newTier = data?.rank_tier || tierFromElo(newEloVal);
+          const oldTier = tierFromElo(oldEloRef.current);
+          setWinEloGain(newEloVal - oldEloRef.current);
+          setWinOldTier(oldTier);
+          setWinNewTier(newTier);
+          refreshProfile();
+        });
         return;
       }
 
@@ -223,7 +223,30 @@ export default function Battle() {
         const sorted = [...submissions].sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0));
         if (sorted[0]?.user_id === profile.id) {
           setShowWinModal(true);
-          setWinEloGain(null);
+          supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle().then(({ data }) => {
+            const newEloVal = data?.elo ?? oldEloRef.current;
+            const newTier = data?.rank_tier || tierFromElo(newEloVal);
+            const oldTier = tierFromElo(oldEloRef.current);
+            setWinEloGain(newEloVal - oldEloRef.current);
+            setWinOldTier(oldTier);
+            setWinNewTier(newTier);
+            refreshProfile();
+          });
+        }
+      }
+
+      if (!isSolo && submissions.length > 0) {
+        const sorted = [...submissions].sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0));
+        if (sorted[0]?.user_id === profile.id) {
+          setShowWinModal(true);
+          supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle().then(({ data }) => {
+            const newEloVal = data?.elo ?? oldEloRef.current;
+            const newTier = data?.rank_tier || tierFromElo(newEloVal);
+            const oldTier = tierFromElo(oldEloRef.current);
+            setWinEloGain(newEloVal - oldEloRef.current);
+            setWinOldTier(oldTier);
+            setWinNewTier(newTier);
+          });
         }
       }
     }
@@ -318,11 +341,13 @@ export default function Battle() {
 
   async function executeLeave(deleteRoom = false) {
     if (!profile || !room || leavingRoom) return;
+    selfLeaving.current = true;
     setLeavingRoom(true);
     setShowDeleteRoomModal(false);
     setShowEarlyLeaveModal(false);
     try {
       const isRanked = room.mode === 'ranked';
+      const preLeaveCount = members?.length || 0;
 
       await supabase
         .from('room_members')
@@ -344,20 +369,8 @@ export default function Battle() {
           .eq('room_id', room.id);
 
         if (remaining?.length === 1) {
-          // Auto-win: winner beats leaver (match ELO is the only penalty)
           const winnerId = remaining[0].user_id;
-
-          await Promise.all([
-            supabase
-              .from('battles')
-              .update({ status: 'closed', winner_id: winnerId, early_closed: false })
-              .eq('id', battle.id)
-              .in('status', ['upcoming', 'active', 'voting']),
-            supabase
-              .from('rooms')
-              .update({ status: 'closed' })
-              .eq('id', room.id),
-          ]);
+          const isOneVOne = preLeaveCount <= 2;
 
           const { data: winnerProfiles } = await supabase
             .from('profiles')
@@ -374,45 +387,78 @@ export default function Battle() {
           await Promise.all([
             supabase.from('profiles').update({
               elo: newWinnerElo,
+              rank_tier: tierFromElo(newWinnerElo),
               wins: (winnerProf?.wins || 0) + 1,
               battles_entered: (winnerProf?.battles_entered || 0) + 1,
               ranked_wins: (winnerProf?.ranked_wins || 0) + 1,
             }).eq('id', winnerId),
             supabase.from('profiles').update({
               elo: newLoserElo,
+              rank_tier: tierFromElo(newLoserElo),
               wins: leaverProfile?.wins || 0,
               battles_entered: (leaverProfile?.battles_entered || 0) + 1,
               ranked_losses: (leaverProfile?.ranked_losses || 0) + 1,
             }).eq('id', profile.id),
           ]);
+
+          if (isOneVOne) {
+            await Promise.all([
+              supabase.from('battles').update({
+                status: 'closed', winner_id: winnerId, early_closed: false,
+              }).eq('id', battle.id).in('status', ['upcoming', 'active', 'voting']),
+              supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id),
+            ]);
+            addToast('MATCH WON — opponent left');
+          } else {
+            const votingMinutes = room?.voting_minutes || 3;
+            const votingEndsAt = new Date(Date.now() + votingMinutes * 60 * 1000).toISOString();
+            await Promise.all([
+              supabase.from('battles').update({
+                status: 'voting', voting_ends_at: votingEndsAt,
+                early_closed: true, winner_id: winnerId,
+              }).eq('id', battle.id).in('status', ['upcoming', 'active', 'voting']),
+              supabase.from('rooms').update({ status: 'voting', is_public: true }).eq('id', room.id),
+            ]);
+            addToast('Opponent left. Voting open for spectators.');
+          }
+        } else if (!remaining || remaining.length === 0) {
+          await supabase.from('room_members').delete().eq('room_id', room.id);
+          await Promise.all([
+            supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id),
+            supabase.from('battles').update({ status: 'closed', early_closed: false }).eq('id', battle.id).in('status', ['upcoming', 'active', 'voting']),
+          ]);
+          addToast('MATCH CLOSED');
         } else {
-          // Non-auto-win: apply -50 early leave penalty
           const currentElo = leaverProfile?.elo ?? DEFAULT_ELO;
+          const newElo = Math.max(0, currentElo - 50);
           await supabase
             .from('profiles')
-            .update({ elo: Math.max(0, currentElo - 50) })
+            .update({
+              elo: newElo,
+              rank_tier: tierFromElo(newElo),
+              ranked_losses: (leaverProfile?.ranked_losses || 0) + 1,
+              battles_entered: (leaverProfile?.battles_entered || 0) + 1,
+            })
             .eq('id', profile.id);
         }
       }
 
       if (deleteRoom) {
-        await supabase
-          .from('rooms')
-          .update({ status: 'closed' })
-          .eq('id', room.id);
-        await supabase
-          .from('room_members')
-          .delete()
-          .eq('room_id', room.id);
+        await supabase.from('room_members').delete().eq('room_id', room.id);
+        await Promise.all([
+          supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id),
+          supabase.from('battles').update({ status: 'closed', early_closed: false }).eq('id', battle.id).in('status', ['upcoming', 'active', 'voting']),
+        ]);
         addToast('ROOM CLOSED');
-      } else {
-        addToast(isRanked ? 'LEFT RANKED MATCH — EARLY LEAVE PENALTY APPLIED' : 'LEFT ROOM');
+      } else if (!isRanked) {
+        addToast('LEFT ROOM');
       }
       navigate('/', { replace: true });
     } catch (err) {
       addToast(err.message || 'COULD NOT LEAVE ROOM', 'error');
     } finally {
       setLeavingRoom(false);
+      selfLeaving.current = false;
     }
   }
 
@@ -890,8 +936,8 @@ export default function Battle() {
           <p>Leaving a ranked match early will cost you <span className="text-rdb-red font-bold">-50 ELO</span>.</p>
           <p className="text-[11px] text-rdb-orange">
             {members.filter((m) => m.user_id !== profile?.id).length === 1
-              ? 'You are the last to leave — the remaining player will auto-win.'
-              : 'Your spot will not be filled.'}
+              ? 'Only 2 players — the remaining player wins automatically.'
+              : 'Your spot is removed; the match continues without you.'}
           </p>
         </div>
       </ConfirmModal>
@@ -899,6 +945,8 @@ export default function Battle() {
       <WinModal
         open={showWinModal}
         eloChange={winEloGain}
+        oldTier={winOldTier}
+        newTier={winNewTier}
         onPlayAgain={() => navigate('/', { replace: true })}
         onClose={() => setShowWinModal(false)}
       />

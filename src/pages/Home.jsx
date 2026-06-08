@@ -55,7 +55,7 @@ export default function Home() {
         .from('rooms')
         .select('id, name, battle_id, status, battles(title)')
         .eq('id', ownRoom.data.room_id)
-        .in('status', ['open', 'locked'])
+        .in('status', ['open', 'locked', 'voting'])
         .maybeSingle();
       foundRoom = roomRow || null;
     }
@@ -84,9 +84,22 @@ export default function Home() {
     setBusy(true);
     console.log('[Home] Leaving room:', currentRoom.id);
     try {
-      const { error } = await supabase.from('room_members').delete().eq('room_id', currentRoom.id).eq('user_id', profile.id);
-      if (error) throw error;
-      addToast('LEFT ROOM');
+      await supabase.from('room_members').delete().eq('room_id', currentRoom.id).eq('user_id', profile.id);
+
+      const { data: remaining } = await supabase
+        .from('room_members')
+        .select('id')
+        .eq('room_id', currentRoom.id)
+        .limit(1);
+      if (!remaining?.length) {
+        await Promise.all([
+          supabase.from('rooms').update({ status: 'closed' }).eq('id', currentRoom.id),
+          supabase.from('battles').update({ status: 'closed', early_closed: false }).eq('id', currentRoom.battle_id).in('status', ['upcoming', 'active', 'voting']),
+        ]);
+        addToast('ROOM CLOSED');
+      } else {
+        addToast('LEFT ROOM');
+      }
       setCurrentRoom(null);
       await loadHomeStats();
     } catch (error) {
