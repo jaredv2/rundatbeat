@@ -66,8 +66,8 @@ export default function MatchmakingModal({ open, onClose }) {
       playUiSound('queue');
       addToast('SEARCHING FOR PLAYERS');
       queueingRef.current = false;
-      onClose();
       navigate(`/lobby/${lobby.id}`);
+      onClose();
     } catch (error) {
       setStatus('idle');
       queueingRef.current = false;

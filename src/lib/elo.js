@@ -66,18 +66,20 @@ function positionScore(position, totalPlayers) {
 export function computeNewElos(players, ranking) {
   const sorted = [...players].sort((a, b) => (ranking[a.user_id] ?? 99) - (ranking[b.user_id] ?? 99));
   const n = sorted.length;
+  if (n === 0) return [];
   const lobbyAvgElo = computeLobbyAverageElo(players);
 
   return sorted.map((p, i) => {
     const actual = n > 1 ? positionScore(i, n) : 0.5;
-    const expected = sorted
-      .filter((o) => o.user_id !== p.user_id)
-      .reduce((sum, o) => sum + expectedScore(p.elo ?? DEFAULT_ELO, o.elo ?? DEFAULT_ELO), 0)
-      / (n - 1);
+    const opponents = sorted.filter((o) => o.user_id !== p.user_id);
+    const expected = opponents.length > 0
+      ? opponents.reduce((sum, o) => sum + expectedScore(p.elo ?? DEFAULT_ELO, o.elo ?? DEFAULT_ELO), 0) / opponents.length
+      : 0.5;
     const K = getPlayerKFactor(p.elo ?? DEFAULT_ELO, lobbyAvgElo);
+    const elo = Math.max(0, newElo(p.elo ?? DEFAULT_ELO, expected, actual, K));
     return {
       user_id: p.user_id,
-      newElo: newElo(p.elo ?? DEFAULT_ELO, expected, actual, K),
+      newElo: elo,
       oldElo: p.elo ?? DEFAULT_ELO,
       kFactor: K,
       expected: +expected.toFixed(3),

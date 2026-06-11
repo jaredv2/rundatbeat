@@ -13,6 +13,10 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
   const timerRef = useRef(null);
   const advancingLobby = useRef(false);
   const closingRef = useRef(false);
+  const battleRef = useRef(battle);
+  const roomRef = useRef(room);
+  battleRef.current = battle;
+  roomRef.current = room;
 
   const isOwner = Boolean(profile?.id && (room?.owner_id === profile.id || room?.host_id === profile.id));
   const isSolo  = room?.mode === 'solo';
@@ -25,13 +29,28 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
   }, [battle?.status, room?.status, battle?.starts_at, battle?.voting_ends_at, room?.voting_minutes, room?.countdown_started_at]);
 
   useEffect(() => {
-    const canDrive = isOwner || (room?.mode === 'ranked' && !room?.owner_id);
-    if (!canDrive || !room) return;
+    if (!room) return;
     clearInterval(timerRef.current);
 
     timerRef.current = setInterval(async () => {
       const now = Date.now();
       const currentPhase = derivePhase(battle, room);
+
+      if (!isSolo && room?.mode === 'ranked' && room?.owner_id && room.owner_id !== profile?.id) {
+        const { data: ownerMember } = await supabase
+          .from('room_members')
+          .select('user_id')
+          .eq('room_id', room.id)
+          .eq('user_id', room.owner_id)
+          .maybeSingle();
+        if (!ownerMember) {
+          await supabase.from('rooms').update({ owner_id: null }).eq('id', room.id);
+          return;
+        }
+      }
+
+      const canDriveNow = isOwner || (room?.mode === 'ranked' && !room?.owner_id);
+      if (!canDriveNow) return;
 
       // Auto-close ranked battle when only 1 player remains
       if (!closingRef.current && !isSolo && room?.mode === 'ranked' && battle?.id && ['active', 'voting', 'upcoming'].includes(currentPhase)) {
@@ -111,16 +130,17 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${room.id}` },
         (payload) => {
+          const b = battleRef.current;
           const rs = payload.new?.status;
           let nextPhase;
           if (rs === 'closed') nextPhase = 'closed';
           else if (rs === 'voting') nextPhase = 'voting';
           else if (rs === 'lobby') nextPhase = 'lobby';
           else if (rs === 'matchmaking') nextPhase = 'matchmaking';
-          else nextPhase = derivePhase(battle, payload.new);
+          else nextPhase = derivePhase(b, payload.new);
           setPhase(nextPhase);
-          setPhaseEndsAt(phaseEndTimestamp(nextPhase, battle, payload.new));
-          onStateChange?.(nextPhase, battle, payload.new);
+          setPhaseEndsAt(phaseEndTimestamp(nextPhase, b, payload.new));
+          onStateChange?.(nextPhase, b, payload.new);
         },
       );
 
@@ -129,10 +149,11 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'battles', filter: `id=eq.${battle.id}` },
         (payload) => {
-          const nextPhase = derivePhase(payload.new, room);
+          const r = roomRef.current;
+          const nextPhase = derivePhase(payload.new, r);
           setPhase(nextPhase);
-          setPhaseEndsAt(phaseEndTimestamp(nextPhase, payload.new, room));
-          onStateChange?.(nextPhase, payload.new, room);
+          setPhaseEndsAt(phaseEndTimestamp(nextPhase, payload.new, r));
+          onStateChange?.(nextPhase, payload.new, r);
         },
       );
     }
@@ -208,18 +229,17 @@ function votingCloseTimestamp(battle, room) {
 }
 
 async function advanceToActive(battleId, roomId, isSolo = false) {
-  const now = new Date().toISOString();
   const [battleRes, roomRes] = await Promise.all([
     supabase
       .from('battles')
-      .update({ status: 'active', starts_at: now })
+      .update({ status: 'active' })
       .eq('id', battleId)
       .eq('status', 'upcoming'),
     supabase
       .from('rooms')
       .update({ status: 'locked' })
       .eq('id', roomId)
-      .in('status', ['open', 'locked']),
+      .in('status', ['lobby', 'open', 'locked']),
   ]);
   if (battleRes.error) throw new Error(`advanceToActive battles: ${battleRes.error.message}`);
   if (roomRes.error) throw new Error(`advanceToActive rooms: ${roomRes.error.message}`);
@@ -238,17 +258,24 @@ async function advanceToVoting(battleId, roomId, votingMinutes = DEFAULT_VOTING_
       .from('rooms')
       .update({ status: 'voting' })
       .eq('id', roomId)
-      .in('status', ['open', 'locked']),
+      .in('status', ['locked']),
   ]);
   if (battleRes.error) throw new Error(`advanceToVoting battles: ${battleRes.error.message}`);
   if (roomRes.error) throw new Error(`advanceToVoting rooms: ${roomRes.error.message}`);
 }
 
 async function advanceToClosed(battleId, roomId) {
+  const { data: memberCount } = await supabase
+    .from('room_members')
+    .select('room_id', { count: 'exact', head: true })
+    .eq('room_id', roomId);
+
+  const isAutoClose = (memberCount ?? 0) <= 1;
+
   const [battleRes, roomRes] = await Promise.all([
     supabase
       .from('battles')
-      .update({ status: 'closed' })
+      .update({ status: 'closed', ...(isAutoClose ? { early_closed: true } : {}) })
       .eq('id', battleId)
       .in('status', ['upcoming', 'active', 'voting'])
       .select('id'),
@@ -256,7 +283,7 @@ async function advanceToClosed(battleId, roomId) {
       .from('rooms')
       .update({ status: 'closed' })
       .eq('id', roomId)
-      .in('status', ['open', 'locked', 'voting']),
+      .in('status', ['locked', 'voting']),
   ]);
   if (battleRes.error) throw new Error(`advanceToClosed battles: ${battleRes.error.message}`);
   if (roomRes.error) throw new Error(`advanceToClosed rooms: ${roomRes.error.message}`);
@@ -271,12 +298,14 @@ async function advanceToClosed(battleId, roomId) {
       if (battle?.mode === 'ranked' && !battle.early_closed) {
         const { data: subs } = await supabase
           .from('submissions')
-          .select('user_id, vote_count')
+          .select('user_id, rating_total')
           .eq('battle_id', battleId)
-          .order('vote_count', { ascending: false });
+          .order('rating_total', { ascending: false });
         if (subs?.length) {
           const ranking = {};
           subs.forEach((s, i) => { ranking[s.user_id] = i + 1; });
+          const winnerId = subs[0].user_id;
+          await supabase.from('battles').update({ winner_id: winnerId }).eq('id', battleId).is('winner_id', null);
           const userIds = subs.map((s) => s.user_id);
           const { data: profiles } = await supabase
             .from('profiles')
@@ -328,7 +357,7 @@ async function allPlayersStoppedVoting(roomId) {
     .from('room_members')
     .select('voting_stopped')
     .eq('room_id', roomId);
-  if (error || !members?.length) return false;
+  if (error || !members?.length || members.length < 2) return false;
   return members.every((m) => m.voting_stopped);
 }
 

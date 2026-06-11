@@ -60,6 +60,8 @@ export function useBattle(id) {
 
   const roomIdRef   = useRef(null);
   const battleIdRef = useRef(null);
+  const [subscribedBattleId, setSubscribedBattleId] = useState(null);
+  const [subscribedRoomId, setSubscribedRoomId] = useState(null);
   const refreshingRef = useRef(false);
 
   // ── Resolve the actual battle_id from raw id (could be room UUID or battle UUID) ──
@@ -117,6 +119,9 @@ export function useBattle(id) {
       if (loadedRoom?.id) {
         await refreshRoomData(loadedRoom.id);
       }
+
+      setSubscribedBattleId(battleIdRef.current);
+      setSubscribedRoomId(roomIdRef.current);
     } catch (err) {
       console.error('[useBattle] refresh error:', err);
     } finally {
@@ -219,7 +224,7 @@ export function useBattle(id) {
       const rid = roomIdRef.current;
 
       channel = supabase
-        .channel(`battle-${id}`)
+        .channel(`battle-${id}-${bid}-${rid}`)
 
         // Battle row changes — merge only changed fields
         .on(
@@ -358,7 +363,7 @@ export function useBattle(id) {
       if (channel) supabase.removeChannel(channel);
     };
   // eslint-disable-next-line react/exhaustive-deps
-  }, [id]);
+  }, [id, subscribedBattleId, subscribedRoomId]);
 
   return {
     battle,

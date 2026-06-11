@@ -5,7 +5,7 @@ import { useVoting } from '../../hooks/useVoting';
 import { useUiStore } from '../../store/uiStore';
 import { playUiSound } from '../../lib/sfx';
 
-export default function VotingFeed({ battle, submissions, profile, votes = {}, ratings = {}, descriptions = {}, votingStopped = false, onVoted, onStopVoting }) {
+export default function VotingFeed({ battle, room, submissions, profile, votes = {}, ratings = {}, descriptions = {}, votingStopped = false, onVoted, onStopVoting }) {
   const { castRating, stopVoting } = useVoting();
   const addToast = useUiStore((s) => s.addToast);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -58,11 +58,11 @@ export default function VotingFeed({ battle, submissions, profile, votes = {}, r
     const newStopped = !votingStopped;
     setTogglingLock(true);
     try {
-      await stopVoting(battle.id, myId, newStopped);
+      await stopVoting(room?.id || battle.id, myId, newStopped);
       onStopVoting?.(newStopped);
-      addToast(newStopped ? 'VOTING LOCKED' : 'VOTING UNLOCKED');
+      if (newStopped) addToast('VOTING LOCKED');
     } catch (error) {
-      addToast(error.message || 'COULD NOT TOGGLE LOCK', 'error');
+      addToast(error.message || 'TOGGLE LOCK FAILED', 'error');
     } finally {
       setTogglingLock(false);
     }

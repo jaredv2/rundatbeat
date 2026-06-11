@@ -74,67 +74,73 @@ export async function advanceLobbyToActive(roomId) {
     .eq('id', roomId)
     .maybeSingle();
 
-  const genres = ['trap', 'hiphop', 'uk-drill', 'edm', 'rap'];
-  const genre = genres[Math.floor(Math.random() * genres.length)];
+  try {
+    const genres = ['trap', 'hiphop', 'uk-drill', 'edm', 'rap'];
+    const genre = genres[Math.floor(Math.random() * genres.length)];
 
-  const { buildChallenge, buildSamplePayload } = await import('./challengeService');
-  const data = await buildChallenge(genre);
-  const sample = data.sample || data;
-  const restriction = data.restriction || '';
-  const challengePayload = buildSamplePayload(sample, restriction);
+    const { buildChallenge, buildSamplePayload } = await import('./challengeService');
+    const data = await buildChallenge(genre);
+    const sample = data.sample || data;
+    const restriction = data.restriction || '';
+    const challengePayload = buildSamplePayload(sample, restriction);
 
-  const { generateBattlePrompt, flattenRestrictions } = await import('./groq');
-  const { json: aiJson } = await generateBattlePrompt({
-    genre: challengePayload.genre,
-    mode: 'room',
-    loopTitle: challengePayload.title,
-    loopBpm: challengePayload.bpm,
-    loopKey: challengePayload.key,
-  });
+    const { generateBattlePrompt, flattenRestrictions } = await import('./groq');
+    const { json: aiJson } = await generateBattlePrompt({
+      genre: challengePayload.genre,
+      mode: 'room',
+      loopTitle: challengePayload.title,
+      loopBpm: challengePayload.bpm,
+      loopKey: challengePayload.key,
+    });
 
-  const restrictionsText = flattenRestrictions(aiJson.restrictions) || aiJson.restrictions_text || '';
+    const restrictionsText = flattenRestrictions(aiJson.restrictions) || aiJson.restrictions_text || '';
 
-  challengePayload.instructions = aiJson.instruction || '';
-  challengePayload.restrictionsList = restrictionsText;
+    challengePayload.instructions = aiJson.instruction || '';
+    challengePayload.restrictionsList = restrictionsText;
 
-  const startDelay = 15;
-  const starts = new Date(Date.now() + startDelay * 1000);
-  const duration = 45;
-  const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
+    const startDelay = 15;
+    const starts = new Date(Date.now() + startDelay * 1000);
+    const duration = 45;
+    const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
 
-  const { data: battle, error: battleErr } = await supabase.from('battles').insert({
-    title: aiJson.title || challengePayload.title,
-    prompt_text: aiJson.instruction || '',
-    genre: challengePayload.genre,
-    bpm: challengePayload.bpm,
-    mood: aiJson.flavor_text || aiJson.mood || '',
-    restrictions: restrictionsText,
-    reference_artists: [],
-    flavor_text: aiJson.flavor_text || '',
-    duration_minutes: duration,
-    song_length_seconds: 60,
-    mode: room?.mode || 'room',
-    status: 'upcoming',
-    starts_at: starts.toISOString(),
-    voting_ends_at: votingEnds.toISOString(),
-  }).select('id').single();
-
-  if (battleErr) throw battleErr;
-
-  await supabase
-    .from('rooms')
-    .update({
-      battle_id: battle.id,
-      status: 'locked',
-      challenge: challengePayload,
-      countdown_started_at: null,
-      battle_starts_in_seconds: startDelay,
+    const { data: battle, error: battleErr } = await supabase.from('battles').insert({
+      title: aiJson.title || challengePayload.title,
+      prompt_text: aiJson.instruction || '',
+      genre: challengePayload.genre,
+      bpm: challengePayload.bpm,
+      mood: aiJson.flavor_text || aiJson.mood || '',
+      restrictions: restrictionsText,
+      reference_artists: [],
+      flavor_text: aiJson.flavor_text || '',
+      duration_minutes: duration,
       song_length_seconds: 60,
-      voting_minutes: 3,
-    })
-    .eq('id', roomId);
+      mode: room?.mode || 'room',
+      status: 'upcoming',
+      starts_at: starts.toISOString(),
+      voting_ends_at: votingEnds.toISOString(),
+    }).select('id').single();
 
-  return { battleId: battle.id };
+    if (battleErr) throw battleErr;
+
+    await supabase
+      .from('rooms')
+      .update({
+        battle_id: battle.id,
+        status: 'locked',
+        challenge: challengePayload,
+        countdown_started_at: null,
+        battle_starts_in_seconds: startDelay,
+        song_length_seconds: 60,
+        voting_minutes: 3,
+      })
+      .eq('id', roomId);
+
+    return { battleId: battle.id };
+  } catch (err) {
+    console.error('[roomService] advanceLobbyToActive failed, resetting:', err);
+    await supabase.from('rooms').update({ countdown_started_at: null }).eq('id', roomId);
+    throw err;
+  }
 }
 
 export async function kickPlayer(roomId, hostId, targetUserId) {
