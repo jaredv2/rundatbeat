@@ -1,10 +1,38 @@
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Trophy, X } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { playUiSound } from '../../lib/sfx';
 import { tierFromElo } from '../../lib/elo';
 
 export default function WinModal({ open, eloChange, oldTier, newTier, onPlayAgain, onClose }) {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!open) return;
+    playUiSound('win');
+    const duration = 2000;
+    const end = Date.now() + duration;
+    const frame = () => {
+      confetti({
+        particleCount: 3,
+        angle: 60,
+        spread: 55,
+        origin: { x: 0, y: 0.7 },
+        colors: ['#f59e0b', '#22d3ee', '#10b981', '#ec4899'],
+      });
+      confetti({
+        particleCount: 3,
+        angle: 120,
+        spread: 55,
+        origin: { x: 1, y: 0.7 },
+        colors: ['#f59e0b', '#22d3ee', '#10b981', '#ec4899'],
+      });
+      if (Date.now() < end) requestAnimationFrame(frame);
+    };
+    frame();
+  }, [open]);
+
   if (!open) return null;
 
   const displayOld = oldTier || (eloChange !== null && tierFromElo(0));

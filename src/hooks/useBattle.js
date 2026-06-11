@@ -1,14 +1,54 @@
 /**
- * useBattle — pure realtime, zero polling
+ * useBattle — realtime + lightweight polling fallback.
+ * Uses array reconciliation (only re-renders changed items) and exposes
+ * optimistic update helpers so components can update local state instantly,
+ * then let realtime sync other clients.
  *
- * All data is pushed via Supabase realtime channels.
- * No setInterval, no manual polling anywhere in this hook.
- *
- * Exposes: battle, submissions, room, members, messages, loading, refresh, refreshRoomData
+ * Exposes: battle, submissions, room, members, messages, loading,
+ *          refresh, refreshRoomData, optimistic*
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
+
+// ── Reconciliation helpers ────────────────────────────────────────────────
+
+/** Merge next into prev, returning prev reference if nothing changed. */
+function mergeObj(prev, next) {
+  if (!next) return null;
+  if (!prev) return next;
+  let changed = false;
+  const merged = { ...prev };
+  for (const key of Object.keys(next)) {
+    if (merged[key] !== next[key]) {
+      merged[key] = next[key];
+      changed = true;
+    }
+  }
+  return changed ? merged : prev;
+}
+
+/**
+ * Reconcile an array by ID. Keeps old references for unchanged items
+ * so React skips re-renders for those items.
+ */
+function reconcileArray(prev, next, keyFn = (item) => item?.id) {
+  if (!next) return prev;
+  if (!prev?.length) return next;
+  const prevMap = new Map(prev.map(item => [keyFn(item), item]));
+  let changed = false;
+  const result = next.map(item => {
+    const key = keyFn(item);
+    const old = prevMap.get(key);
+    if (!old) { changed = true; return item; }
+    if (JSON.stringify(old) !== JSON.stringify(item)) { changed = true; return item; }
+    return old;
+  });
+  if (result.length !== prev.length) changed = true;
+  return changed ? result : prev;
+}
+
+// ── Hook ──────────────────────────────────────────────────────────────────
 
 export function useBattle(id) {
   const [battle, setBattle]           = useState(null);
@@ -18,61 +58,80 @@ export function useBattle(id) {
   const [messages, setMessages]       = useState([]);
   const [loading, setLoading]         = useState(true);
 
-  // Stable ref so realtime handlers can filter room-scoped events without
-  // stale closures — updated whenever room loads or changes via realtime.
-  const roomIdRef = useRef(null);
+  const roomIdRef   = useRef(null);
+  const battleIdRef = useRef(null);
+  const refreshingRef = useRef(false);
 
-  // ── Full refresh (called once on mount and on submission changes) ─────────
-  async function refresh() {
-    if (!supabase || !id) return;
-    console.log('[useBattle] refresh() — battle id:', id);
-    setLoading(true);
+  // ── Resolve the actual battle_id from raw id (could be room UUID or battle UUID) ──
+  async function resolveIds(rawId) {
+    let b = await supabase.from('battles').select('id').eq('id', rawId).maybeSingle();
+    if (b?.data) return { battleId: b.data.id, roomId: null };
 
-    const [
-      { data: battleData,     error: battleError },
-      { data: submissionData, error: subError },
-      { data: roomData,       error: roomError },
-    ] = await Promise.all([
-      supabase.from('battles').select('*').eq('id', id).maybeSingle(),
-      supabase
-        .from('submissions')
-        .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
-        .eq('battle_id', id)
-        .order('vote_count', { ascending: false }),
-      supabase.from('rooms').select('*').eq('battle_id', id).maybeSingle(),
-    ]);
+    let r = await supabase.from('rooms').select('id, battle_id').eq('id', rawId).maybeSingle();
+    if (r?.data) return { battleId: r.data.battle_id || null, roomId: r.data.id };
 
-    if (battleError)  console.error('[useBattle] battles error:', battleError);
-    if (subError)     console.error('[useBattle] submissions error:', subError);
-    if (roomError)    console.error('[useBattle] room error:', roomError);
-
-    setBattle(battleData ?? null);
-    setSubmissions(submissionData ?? []);
-
-    const loadedRoom = roomData ?? null;
-    setRoom(loadedRoom);
-    roomIdRef.current = loadedRoom?.id ?? null;
-
-    if (loadedRoom?.id) {
-      await refreshRoomData(loadedRoom.id);
-    }
-
-    console.log(
-      '[useBattle] status:', battleData?.status,
-      '| submissions:', submissionData?.length ?? 0,
-      '| room:', loadedRoom?.id ?? 'none',
-      '| mode:', loadedRoom?.mode ?? 'n/a',
-    );
-    setLoading(false);
+    return { battleId: null, roomId: null };
   }
 
-  // ── Lightweight room-scoped refresh (members + chat only) ─────────────────
+  // ── Full refresh (mount / forced) ───────────────────────────────────────
+  async function refresh() {
+    if (!supabase || !id) return;
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setLoading(true);
+
+    try {
+      const ids = await resolveIds(id);
+      if (ids.roomId) roomIdRef.current = ids.roomId;
+      const actualBattleId = ids.battleId || id;
+      battleIdRef.current = actualBattleId;
+
+      const queries = [
+        supabase.from('battles').select('*').eq('id', actualBattleId).maybeSingle(),
+        supabase.from('submissions')
+          .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
+          .eq('battle_id', actualBattleId)
+          .order('vote_count', { ascending: false }),
+      ];
+
+      if (ids.roomId) {
+        queries.push(supabase.from('rooms').select('*').eq('id', ids.roomId).maybeSingle());
+      } else {
+        queries.push(supabase.from('rooms').select('*').eq('battle_id', actualBattleId).maybeSingle());
+      }
+
+      const [{ data: battleData }, { data: submissionData }, { data: roomData }] = await Promise.all(queries);
+
+      setBattle(prev => mergeObj(prev, battleData ?? null));
+      setSubmissions(prev => reconcileArray(prev, submissionData ?? []));
+
+      let loadedRoom = roomData ?? null;
+      if (!loadedRoom && !ids.roomId) {
+        const { data: directRoom } = await supabase.from('rooms').select('*').eq('id', id).maybeSingle();
+        loadedRoom = directRoom ?? null;
+        if (loadedRoom?.id) roomIdRef.current = loadedRoom.id;
+      }
+      setRoom(prev => mergeObj(prev, loadedRoom));
+      roomIdRef.current = loadedRoom?.id ?? roomIdRef.current;
+
+      if (loadedRoom?.id) {
+        await refreshRoomData(loadedRoom.id);
+      }
+    } catch (err) {
+      console.error('[useBattle] refresh error:', err);
+    } finally {
+      setLoading(false);
+      refreshingRef.current = false;
+    }
+  }
+
+  // ── Lightweight room-scoped refresh (members + chat only) ─────────────
   async function refreshRoomData(roomId) {
     if (!supabase || !roomId) return;
     const [{ data: memberRows }, { data: messageRows }] = await Promise.all([
       supabase
         .from('room_members')
-        .select('role, user_id, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
+        .select('role, user_id, is_ready, voting_stopped, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
         .eq('room_id', roomId)
         .order('joined_at'),
       supabase
@@ -82,122 +141,223 @@ export function useBattle(id) {
         .order('created_at', { ascending: true })
         .limit(50),
     ]);
-    setMembers(memberRows ?? []);
-    setMessages(messageRows ?? []);
+    setMembers(prev => reconcileArray(prev, memberRows ?? []));
+    setMessages(prev => reconcileArray(prev, messageRows ?? []));
   }
 
-  // ── Lightweight submissions-only refresh (triggered by vote events) ───────
+  // ── Lightweight submissions-only refresh ───────────────────────────────
   async function refreshSubmissions() {
-    if (!supabase || !id) return;
+    const bid = battleIdRef.current || id;
+    if (!supabase || !bid) return;
     const { data } = await supabase
       .from('submissions')
       .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
-      .eq('battle_id', id)
+      .eq('battle_id', bid)
       .order('vote_count', { ascending: false });
-    if (data) setSubmissions(data);
+    if (data) setSubmissions(prev => reconcileArray(prev, data));
   }
 
-  // ── Realtime subscriptions ────────────────────────────────────────────────
+  // ── Optimistic update helpers ──────────────────────────────────────────
+  // Call these BEFORE the server request. Other clients sync via realtime.
+
+  /** Optimistically update a single submission (e.g. after vote lands). */
+  function optimisticSubmission(id, patch) {
+    setSubmissions(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
+  }
+
+  /** Optimistically add a new submission to the top of the list. */
+  function optimisticAddSubmission(sub) {
+    setSubmissions(prev => [sub, ...prev]);
+  }
+
+  /** Optimistically remove a submission (e.g. on delete). */
+  function optimisticRemoveSubmission(id) {
+    setSubmissions(prev => prev.filter(s => s.id !== id));
+  }
+
+  /** Optimistically toggle a member's ready state. */
+  function optimisticReady(userId, isReady) {
+    setMembers(prev => prev.map(m => m.user_id === userId ? { ...m, is_ready: isReady } : m));
+  }
+
+  /** Optimistically toggle voting_stopped for a member. */
+  function optimisticVotingStopped(userId, stopped) {
+    setMembers(prev => prev.map(m => m.user_id === userId ? { ...m, voting_stopped: stopped } : m));
+  }
+
+  /** Optimistically append a chat message (with local id). */
+  function optimisticMessage(msg) {
+    setMessages(prev => [...prev, msg]);
+  }
+
+  /** Optimistically remove a local-only message (on send failure). */
+  function optimisticRemoveMessage(tempId) {
+    setMessages(prev => prev.filter(m => m.id !== tempId));
+  }
+
+  /** Optimistically merge battle fields. */
+  function optimisticBattle(patch) {
+    setBattle(prev => ({ ...prev, ...patch }));
+  }
+
+  /** Optimistically merge room fields. */
+  function optimisticRoom(patch) {
+    setRoom(prev => ({ ...prev, ...patch }));
+  }
+
+  // ── Realtime subscriptions ────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     let channel = null;
+    let pollTimer = null;
 
     (async () => {
       await refresh();
       if (cancelled || !supabase || !id) return;
 
+      const bid = battleIdRef.current || id;
+      const rid = roomIdRef.current;
+
       channel = supabase
         .channel(`battle-${id}`)
 
-        // Battle row changes (status, timestamps)
+        // Battle row changes — merge only changed fields
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'battles', filter: `id=eq.${id}` },
+          { event: 'UPDATE', schema: 'public', table: 'battles', filter: `id=eq.${bid}` },
           (payload) => {
-            console.log('[useBattle] realtime battle →', payload.new?.status);
-            setBattle((prev) => ({ ...prev, ...payload.new }));
+            setBattle(prev => mergeObj(prev, payload.new));
           },
         )
 
-        // Vote changes → re-rank submissions without full refresh
+        // Vote changes → reconcile submissions
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'votes', filter: `battle_id=eq.${id}` },
-          () => {
-            console.log('[useBattle] realtime vote change — refreshing submissions');
-            refreshSubmissions();
-          },
+          { event: '*', schema: 'public', table: 'votes', filter: `battle_id=eq.${bid}` },
+          () => { refreshSubmissions(); },
         )
 
-        // New / updated submissions
+        // Submission inserts — add optimistically or reconcile
         .on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: 'submissions', filter: `battle_id=eq.${id}` },
-          () => {
-            console.log('[useBattle] realtime submission change — full refresh');
-            refresh();
-          },
-        )
-
-        // Room row updates (status transitions: open → locked → voting → closed)
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `battle_id=eq.${id}` },
+          { event: 'INSERT', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` },
           (payload) => {
-            console.log('[useBattle] realtime room update → status:', payload.new?.status);
-            setRoom((prev) => ({ ...prev, ...payload.new }));
-            roomIdRef.current = payload.new?.id ?? roomIdRef.current;
-            // Sync battle status from room (battles table may not be in realtime publication)
-            const rs = payload.new?.status;
-            if (rs === 'closed' || rs === 'voting' || rs === 'locked') {
-              setBattle((prev) => {
-                if (prev?.status === rs) return prev;
-                const mapped = rs === 'locked' ? 'active' : rs;
-                return { ...prev, status: mapped };
+            const sub = payload.new;
+            setSubmissions(prev => {
+              if (prev.some(s => s.id === sub.id)) return prev;
+              return [sub, ...prev];
+            });
+          },
+        )
+
+        // Submission updates — merge only changed fields
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` },
+          (payload) => {
+            const updated = payload.new;
+            setSubmissions(prev => prev.map(s => s.id === updated.id ? mergeObj(s, updated) : s));
+          },
+        )
+
+        // Submission deletes — remove
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` },
+          (payload) => {
+            const oldId = payload.old?.id;
+            if (oldId) setSubmissions(prev => prev.filter(s => s.id !== oldId));
+          },
+        )
+
+        // Room row updates — merge
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'rooms', filter: rid ? `id=eq.${rid}` : `battle_id=eq.${bid}` },
+          (payload) => {
+            const updated = payload.new;
+            const old = payload.old;
+            setRoom(prev => mergeObj(prev, updated));
+            roomIdRef.current = updated?.id ?? roomIdRef.current;
+            if (updated?.battle_id && !old?.battle_id) {
+              battleIdRef.current = updated.battle_id;
+              refresh();
+            }
+          },
+        )
+
+        // Room members — reconcile individual member
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'room_members' },
+          (payload) => {
+            if (payload.new?.room_id === roomIdRef.current) {
+              const member = payload.new;
+              setMembers(prev => {
+                if (prev.some(m => m.user_id === member.user_id)) return prev;
+                return [...prev, member];
+              });
+            }
+          },
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'room_members' },
+          (payload) => {
+            if (payload.new?.room_id === roomIdRef.current) {
+              const updated = payload.new;
+              setMembers(prev => prev.map(m => m.user_id === updated.user_id ? mergeObj(m, updated) : m));
+            }
+          },
+        )
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'room_members' },
+          (payload) => {
+            const oldUserId = payload.old?.user_id;
+            const oldRoomId = payload.old?.room_id;
+            if (oldRoomId === roomIdRef.current && oldUserId) {
+              setMembers(prev => prev.filter(m => m.user_id !== oldUserId));
+            }
+          },
+        )
+
+        // Chat messages — append
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'room_messages' },
+          (payload) => {
+            if (payload.new?.room_id === roomIdRef.current) {
+              const msg = payload.new;
+              setMessages(prev => {
+                if (prev.some(m => m.id === msg.id)) return prev;
+                return [...prev, msg];
               });
             }
           },
         )
 
-        // Room members (joins / leaves)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'room_members' },
-          (payload) => {
-            const affectedRoomId = payload.new?.room_id || payload.old?.room_id;
-            if (affectedRoomId && affectedRoomId === roomIdRef.current) {
-              console.log('[useBattle] realtime room_members change');
-              refreshRoomData(affectedRoomId);
-            }
-          },
-        )
+        .subscribe();
 
-        // Chat messages
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'room_messages' },
-          (payload) => {
-            const msgRoomId = payload.new?.room_id;
-            if (msgRoomId && msgRoomId === roomIdRef.current) {
-              console.log('[useBattle] realtime new message');
-              refreshRoomData(msgRoomId);
-            }
-          },
-        )
-
-        .subscribe((status) => {
-          console.log('[useBattle] realtime channel status:', status);
-        });
+      // ── Fallback polling — only while IDs unresolved ──
+      if (!rid || !bid) {
+        pollTimer = setInterval(() => {
+          if (cancelled) { clearInterval(pollTimer); return; }
+          if (roomIdRef.current && battleIdRef.current) {
+            clearInterval(pollTimer);
+            return;
+          }
+          refresh();
+        }, 3000);
+      }
     })();
 
     return () => {
       cancelled = true;
-      if (channel) {
-        console.log('[useBattle] unsubscribing realtime channel');
-        supabase.removeChannel(channel);
-      }
+      if (pollTimer) clearInterval(pollTimer);
+      if (channel) supabase.removeChannel(channel);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react/exhaustive-deps
   }, [id]);
 
   return {
@@ -209,5 +369,16 @@ export function useBattle(id) {
     loading,
     refresh,
     refreshRoomData,
+    refreshSubmissions,
+    // Optimistic helpers
+    optimisticSubmission,
+    optimisticAddSubmission,
+    optimisticRemoveSubmission,
+    optimisticReady,
+    optimisticVotingStopped,
+    optimisticMessage,
+    optimisticRemoveMessage,
+    optimisticBattle,
+    optimisticRoom,
   };
 }

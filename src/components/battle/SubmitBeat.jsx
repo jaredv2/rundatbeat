@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { playUiSound } from '../../lib/sfx';
 import { uploadBeat } from '../../lib/storage';
 import { AUDIO_LIMITS, validateAudioDuration, validateAudioFile } from '../../lib/validators';
@@ -14,6 +14,11 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
   const [error, setError] = useState('');
   const addToast = useUiStore((s) => s.addToast);
 
+  const maxSec = useMemo(
+    () => battle.song_length_seconds >= 10000 ? Infinity : (battle.song_length_seconds || AUDIO_LIMITS.maxDurationSeconds),
+    [battle.song_length_seconds]
+  );
+
   if (existingSubmission) {
     return <div className="rdb-panel p-5 font-mono text-rdb-orange">BEAT SUBMITTED</div>;
   }
@@ -26,7 +31,6 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
       setError(validation);
       return;
     }
-    const maxSec = battle.song_length_seconds >= 10000 ? Infinity : (battle.song_length_seconds || AUDIO_LIMITS.maxDurationSeconds);
     const durationError = await validateAudioDuration(file, maxSec);
     if (durationError) {
       setError(durationError);

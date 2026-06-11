@@ -14,7 +14,7 @@ export default function VoteCard({ submission, rank }) {
       </div>
       <p className="my-3 text-rdb-muted">{submission.description}</p>
       <WaveformPlayer url={submission.audio_url} />
-      <div className="mt-3 font-mono text-rdb-orange">{formatNumber(submission.vote_count)} SCORE</div>
+      <div className="mt-3 font-mono text-rdb-orange">{formatNumber(submission.rating_total ?? submission.vote_count ?? 0)} SCORE</div>
     </div>
   );
 }

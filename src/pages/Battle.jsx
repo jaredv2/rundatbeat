@@ -12,16 +12,18 @@
  *  – forceClose exposed so owner can end voting early.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy } from 'lucide-react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useBlocker, useNavigate, useParams } from 'react-router-dom';
 import BattlePrompt from '../components/battle/BattlePrompt';
 import BattleResults from '../components/battle/BattleResults';
+import SampleCard from '../components/battle/SampleCard';
 import PremiumGate from '../components/battle/PremiumGate';
 import SubmitBeat from '../components/battle/SubmitBeat';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import WinModal from '../components/ui/WinModal';
 import VotingFeed from '../components/voting/VotingFeed';
+import ChallengeReveal from '../components/battle/ChallengeReveal';
 import WaveformPlayer from '../components/audio/WaveformPlayer';
 import { useBattle } from '../hooks/useBattle';
 import { useRoomStateMachine } from '../hooks/useRoomStateMachine';
@@ -33,6 +35,7 @@ import {
   getNameplateEmoji,
 } from '../lib/display';
 import { DEFAULT_ELO, tierFromElo } from '../lib/elo';
+import { toggleReady, startCountdown, leaveLobby, kickPlayer } from '../lib/roomService';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
@@ -82,16 +85,20 @@ function SongLengthBadge({ seconds }) {
 
 function PhaseBadge({ phase }) {
   const styles = {
-    upcoming: 'border-yellow-600 text-yellow-400',
-    active:   'border-green-600  text-green-400',
-    voting:   'border-rdb-orange text-rdb-orange',
-    closed:   'border-rdb-border text-rdb-muted',
+    matchmaking: 'border-yellow-700 text-yellow-500',
+    lobby:       'border-yellow-600 text-yellow-400',
+    upcoming:    'border-yellow-600 text-yellow-400',
+    active:      'border-green-600  text-green-400',
+    voting:      'border-rdb-orange text-rdb-orange',
+    closed:      'border-rdb-border text-rdb-muted',
   };
   const labels = {
-    upcoming: 'LOBBY',
-    active:   'SUBMITTING',
-    voting:   'VOTING',
-    closed:   'CLOSED',
+    matchmaking: 'FINDING PLAYERS',
+    lobby:       'LOBBY',
+    upcoming:    'LOBBY',
+    active:      'SUBMITTING',
+    voting:      'VOTING',
+    closed:      'CLOSED',
   };
   return (
     <span
@@ -123,10 +130,11 @@ export default function Battle() {
   const addToast  = useUiStore((s) => s.addToast);
 
   // useBattle is fully realtime — no polling anywhere below
-  const { battle, submissions, room, members, messages, loading, refresh, refreshRoomData } =
+  const { battle, submissions, room, members, messages, loading, refresh, refreshRoomData, optimisticMessage, optimisticRemoveMessage } =
     useBattle(id);
 
-  const [votes, setVotes]           = useState({});
+  const [ratings, setRatings]       = useState({});
+  const [descriptions, setDescriptions] = useState({});
   const [paid, setPaid]             = useState(false);
   const [messageBody, setMessageBody] = useState('');
   const [isStarting, setIsStarting] = useState(false);
@@ -138,8 +146,13 @@ export default function Battle() {
   const [winEloGain, setWinEloGain] = useState(null);
   const [winOldTier, setWinOldTier] = useState(null);
   const [winNewTier, setWinNewTier] = useState(null);
+  const [countdown, setCountdown] = useState(null);
   const chatEndRef = useRef(null);
   const selfLeaving = useRef(false);
+
+  const myMember = members.find((m) => m.user_id === profile?.id);
+  const allReady = members.length >= 2 && members.every((m) => m.is_ready);
+  const readyCount = members.filter((m) => m.is_ready).length;
 
   // ── Room state machine ────────────────────────────────────────────────────
   const { phase, phaseEndsAt, forceStart, forceClose, isOwner, isSolo } =
@@ -153,14 +166,14 @@ export default function Battle() {
       },
     });
 
-  // ── Load existing votes + premium status on mount ─────────────────────────
+  // ── Load existing ratings + premium status on mount ─────────────────────────
   useEffect(() => {
     if (!profile || !id || !supabase) return;
-    async function loadVoteAndPaid() {
+    async function loadRatingsAndPaid() {
       const [{ data: voteRows }, { data: tx }] = await Promise.all([
         supabase
           .from('votes')
-          .select('submission_id, direction')
+          .select('submission_id, rating, description')
           .eq('battle_id', id)
           .eq('voter_id', profile.id),
         supabase
@@ -171,18 +184,57 @@ export default function Battle() {
           .eq('reason', 'premium_entry')
           .maybeSingle(),
       ]);
-      setVotes(
-        Object.fromEntries((voteRows || []).map((r) => [r.submission_id, r.direction || 1])),
+      setRatings(
+        Object.fromEntries((voteRows || []).map((r) => [r.submission_id, r.rating])),
+      );
+      setDescriptions(
+        Object.fromEntries((voteRows || []).map((r) => [r.submission_id, r.description || ''])),
       );
       setPaid(Boolean(tx));
     }
-    loadVoteAndPaid();
+    loadRatingsAndPaid();
   }, [profile?.id, id]);
 
   // ── Auto-scroll chat ──────────────────────────────────────────────────────
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // ── Leave cleanup on tab close / refresh (all phases) ────────────────────
+  useEffect(() => {
+    if (!profile || !room) return;
+
+    const doLeave = () => {
+      if (selfLeaving.current) return;
+      selfLeaving.current = true;
+      supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id).then(() => {
+        supabase.from('room_members').select('room_id', { count: 'exact', head: true }).eq('room_id', room.id).then(({ count }) => {
+          if (count <= 0) supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
+          else supabase.from('rooms').update({ current_players: count }).eq('id', room.id);
+        });
+      });
+    };
+
+    window.addEventListener('beforeunload', doLeave);
+    return () => window.removeEventListener('beforeunload', doLeave);
+  }, [profile?.id, room?.id, room?.status]);
+
+  // ── Lobby countdown ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!room?.countdown_started_at || phase !== 'lobby') {
+      setCountdown(null);
+      return;
+    }
+    const target = new Date(room.countdown_started_at).getTime() + 5000;
+    let raf;
+    function tick() {
+      const remaining = Math.max(0, Math.ceil((target - Date.now()) / 1000));
+      setCountdown(remaining > 0 ? remaining : null);
+      if (remaining > 0) raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [room?.countdown_started_at, phase]);
 
   // ── Redirect when kicked (room_members deleted while on page) ─────────────
   const wasMember = useRef(false);
@@ -206,12 +258,15 @@ export default function Battle() {
       wasClosed.current = true;
 
       if (battle?.winner_id === profile.id) {
+        console.log('[Win] battle closed, winner detected, querying profile');
         setShowWinModal(true);
         supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle().then(({ data }) => {
           const newEloVal = data?.elo ?? oldEloRef.current;
           const newTier = data?.rank_tier || tierFromElo(newEloVal);
           const oldTier = tierFromElo(oldEloRef.current);
-          setWinEloGain(newEloVal - oldEloRef.current);
+          const gain = newEloVal - oldEloRef.current;
+          console.log('[Win] elo — old:', oldEloRef.current, 'new:', newEloVal, 'gain:', gain, 'tier:', oldTier, '→', newTier);
+          setWinEloGain(gain);
           setWinOldTier(oldTier);
           setWinNewTier(newTier);
           refreshProfile();
@@ -220,47 +275,49 @@ export default function Battle() {
       }
 
       if (!isSolo && submissions.length > 0) {
-        const sorted = [...submissions].sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0));
+        const sorted = [...submissions].sort((a, b) => (b.rating_total || b.vote_count || 0) - (a.rating_total || a.vote_count || 0));
         if (sorted[0]?.user_id === profile.id) {
+          console.log('[Win] battle closed, top submission detected, querying profile');
           setShowWinModal(true);
           supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle().then(({ data }) => {
             const newEloVal = data?.elo ?? oldEloRef.current;
             const newTier = data?.rank_tier || tierFromElo(newEloVal);
             const oldTier = tierFromElo(oldEloRef.current);
-            setWinEloGain(newEloVal - oldEloRef.current);
+            const gain = newEloVal - oldEloRef.current;
+            console.log('[Win] elo — old:', oldEloRef.current, 'new:', newEloVal, 'gain:', gain, 'tier:', oldTier, '→', newTier);
+            setWinEloGain(gain);
             setWinOldTier(oldTier);
             setWinNewTier(newTier);
             refreshProfile();
           });
         }
       }
-
-      if (!isSolo && submissions.length > 0) {
-        const sorted = [...submissions].sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0));
-        if (sorted[0]?.user_id === profile.id) {
-          setShowWinModal(true);
-          supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle().then(({ data }) => {
-            const newEloVal = data?.elo ?? oldEloRef.current;
-            const newTier = data?.rank_tier || tierFromElo(newEloVal);
-            const oldTier = tierFromElo(oldEloRef.current);
-            setWinEloGain(newEloVal - oldEloRef.current);
-            setWinOldTier(oldTier);
-            setWinNewTier(newTier);
-          });
-        }
-      }
     }
   }, [phase, loading, profile?.id]);
 
-  // ── Re-fetch votes after casting one ─────────────────────────────────────
-  async function reloadVotes() {
+  // ── Leave confirmation for ranked match during submission ──────────────────
+  const isRankedMatch = room?.mode === 'ranked' && !isSolo;
+  const shouldConfirmLeave = isRankedMatch && (phase === 'active' || phase === 'voting');
+  useBlocker(
+    useCallback(() => !selfLeaving.current && shouldConfirmLeave, [shouldConfirmLeave])
+  );
+  useEffect(() => {
+    if (!shouldConfirmLeave) return;
+    const handler = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [shouldConfirmLeave]);
+
+  // ── Re-fetch ratings after casting one ─────────────────────────────────────
+  async function reloadRatings() {
     if (!profile || !id || !supabase) return;
     const { data } = await supabase
       .from('votes')
-      .select('submission_id, direction')
+      .select('submission_id, rating, description')
       .eq('battle_id', id)
       .eq('voter_id', profile.id);
-    setVotes(Object.fromEntries((data || []).map((r) => [r.submission_id, r.direction || 1])));
+    setRatings(Object.fromEntries((data || []).map((r) => [r.submission_id, r.rating])));
+    setDescriptions(Object.fromEntries((data || []).map((r) => [r.submission_id, r.description || ''])));
   }
 
   // ── Chat ──────────────────────────────────────────────────────────────────
@@ -269,12 +326,15 @@ export default function Battle() {
     if (!profile || !room || !messageBody.trim()) return;
     const body = messageBody.trim();
     setMessageBody('');
+    const tempId = `opt-${Date.now()}`;
+    optimisticMessage({ id: tempId, room_id: room.id, user_id: profile.id, body, created_at: new Date().toISOString(), profiles: { username: profile.username } });
     try {
       const { error } = await supabase
         .from('room_messages')
         .insert({ room_id: room.id, user_id: profile.id, body });
       if (error) throw error;
     } catch (err) {
+      optimisticRemoveMessage(tempId);
       addToast(err.message || 'MESSAGE FAILED', 'error');
     }
   }
@@ -351,11 +411,13 @@ export default function Battle() {
       const isRanked = room.mode === 'ranked';
       const preLeaveCount = members?.length || 0;
 
-      await supabase
-        .from('room_members')
-        .delete()
-        .eq('room_id', room.id)
-        .eq('user_id', profile.id);
+      await Promise.all([
+        supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id),
+        isRanked ? supabase.from('submissions').delete().eq('battle_id', room.battle_id).eq('user_id', profile.id) : null,
+        isRanked ? supabase.from('votes').delete().eq('room_id', room.id).eq('voter_id', profile.id) : null,
+      ]);
+
+      window.__clearReturnTo?.();
 
       // Ranked: determine outcome after leaving
       if (isRanked) {
@@ -467,17 +529,19 @@ export default function Battle() {
   // ── Guards ────────────────────────────────────────────────────────────────
   if (!profile) return <Navigate to="/login" replace />;
   if (loading)  return <main className="rdb-container font-mono text-rdb-orange blink">LOADING...</main>;
-  if (!battle)  return <main className="rdb-container font-mono text-rdb-red">BATTLE NOT FOUND</main>;
+  if (!battle && !room)  return <main className="rdb-container font-mono text-rdb-red">BATTLE NOT FOUND</main>;
 
   const mine          = submissions.find((s) => s.user_id === profile.id);
-  const premiumLocked = battle.is_premium && !paid;
+  const premiumLocked = battle?.is_premium && !paid;
   const canSubmit     = phase === 'active';
   const isMember      = members.some((m) => m.user_id === profile.id);
-  const songSeconds   = room?.song_length_seconds || battle.song_length_seconds || null;
+  const songSeconds   = room?.song_length_seconds || battle?.song_length_seconds || null;
   const isVotingPhase = phase === 'voting';
 
   const statusLabel = {
-    upcoming: isSolo ? 'SOLO LOBBY' : 'LOBBY — WAITING',
+    matchmaking: 'FINDING PLAYERS',
+    lobby: isSolo ? 'SOLO LOBBY' : 'LOBBY — WAITING',
+    upcoming: isSolo ? 'SOLO LOBBY' : 'CHALLENGE REVEAL',
     active:   'SUBMISSIONS OPEN',
     voting:   'VOTING OPEN',
     closed:   'CLOSED',
@@ -486,7 +550,11 @@ export default function Battle() {
   return isSolo ? (
     <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center py-12">
       <div className="mx-auto w-full max-w-2xl space-y-5">
-        <BattlePrompt battle={battle} />
+        {room?.challenge && phase === 'active' ? (
+          <SampleCard challenge={room.challenge} />
+        ) : (
+          <BattlePrompt battle={battle} />
+        )}
 
         {isOwner && phase === 'upcoming' && (
           <div className="rdb-panel p-5 text-center">
@@ -538,13 +606,164 @@ export default function Battle() {
         </div>
       </div>
     </main>
+  ) : phase === 'lobby' && !isSolo ? (
+    <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center py-12">
+      <div className="mx-auto w-full max-w-xl space-y-5">
+
+        {/* ── Room header ── */}
+        <div className="text-center">
+          <h1 className="font-mono text-2xl font-bold uppercase text-rdb-text">
+            {room?.name || 'BATTLE LOBBY'}
+          </h1>
+          <p className="mt-1 font-mono text-[11px] uppercase text-rdb-muted">
+            {isOwner ? 'HOST LOBBY' : 'LOBBY'} — {members.length}/{room?.max_players || 4} PLAYERS
+          </p>
+          {room?.room_code && (
+            <button
+              className="mt-2 inline-flex items-center gap-1.5 font-mono text-[12px] uppercase text-rdb-orange hover:underline"
+              onClick={() => { playUiSound('click'); navigator.clipboard.writeText(room.room_code); addToast('ROOM CODE COPIED'); }}
+              type="button"
+            >
+              <Copy size={13} />
+              ROOM CODE: {room.room_code}
+            </button>
+          )}
+        </div>
+
+        {/* ── Player list ── */}
+        <div className="rdb-panel p-5">
+          <h2 className="font-mono text-[12px] uppercase text-rdb-orange mb-3">PLAYERS</h2>
+          <div className="space-y-2">
+            {members.map((member) => {
+              const isSelf = member.user_id === profile?.id;
+              const canKick = isOwner && !isSelf && member.role !== 'owner';
+              return (
+                <div
+                  key={member.user_id}
+                  className="flex items-center justify-between gap-2 rounded border border-rdb-border bg-rdb-bg px-3 py-2.5"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className={`inline-block h-2.5 w-2.5 rounded-full flex-shrink-0 ${member.is_ready ? 'bg-green-400' : 'bg-rdb-orange/40'}`} />
+                    <span className={`truncate font-mono text-[12px] uppercase ${getNameCosmeticClassName(member.profiles)}`} style={getNameGradientStyle(member.profiles)}>
+                      {member.profiles?.nameplate_icon && <span className="mr-1 text-rdb-orange">{getNameplateEmoji(member.profiles.nameplate_icon)}</span>}
+                      {member.profiles?.username || 'USER'}
+                      {isSelf && <span className="ml-1.5 text-rdb-muted text-[10px]">(YOU)</span>}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className={`font-mono text-[10px] uppercase ${member.is_ready ? 'text-green-400' : 'text-rdb-muted'}`}>
+                      {member.is_ready ? 'READY' : 'NOT READY'}
+                    </span>
+                    {canKick && (
+                      <button className="text-rdb-red hover:text-rdb-red/70 ml-1" onClick={() => { playUiSound('cancel'); kickPlayer(room.id, profile.id, member.user_id); }} type="button">
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {!members.length && (
+              <div className="rounded border border-rdb-border bg-rdb-bg p-4 text-center font-mono text-[11px] uppercase text-rdb-muted">
+                Waiting for players...
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Ready / Start controls ── */}
+        <div className="rdb-panel p-5 flex flex-col items-center gap-3">
+          {countdown !== null && (
+            <div className="flex flex-col items-center gap-2 w-full">
+              <div className="font-mono text-[12px] uppercase text-rdb-orange blink">
+                {countdown > 0 ? `GAME STARTING IN ${countdown}s` : 'STARTING...'}
+              </div>
+              <div className="h-1.5 w-full max-w-[240px] overflow-hidden rounded-full bg-white/10">
+                <div className="h-full rounded-full bg-rdb-orange transition-all duration-1000" style={{ width: `${((5 - countdown) / 5) * 100}%` }} />
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 w-full">
+            {!isOwner && (
+              <button
+                className={`flex-1 h-11 font-mono text-[12px] uppercase font-bold ${myMember?.is_ready ? 'rdb-button border-rdb-orange text-rdb-orange' : 'rdb-button rdb-button-primary'}`}
+                disabled={countdown !== null}
+                onClick={() => { playUiSound('click'); toggleReady(room.id, profile.id).then(() => refresh()); }}
+                type="button"
+              >
+                {myMember?.is_ready ? 'UNREADY' : 'READY UP'}
+              </button>
+            )}
+            {isOwner && (
+              <button
+                className="flex-1 h-11 rdb-button rdb-button-primary font-mono text-[12px] uppercase font-bold"
+                disabled={countdown !== null || members.length < 2}
+                onClick={() => { playUiSound('click'); startCountdown(room.id); addToast('COUNTDOWN STARTED'); }}
+                type="button"
+              >
+                {allReady ? 'START NOW' : 'START ANYWAY'}
+              </button>
+            )}
+            <button
+              className="h-11 px-6 rdb-button border-rdb-red text-rdb-red font-mono text-[12px] uppercase"
+              disabled={countdown !== null || leavingRoom}
+              onClick={() => { setLeavingRoom(true); playUiSound('cancel'); leaveLobby(room.id, profile.id).finally(() => { setLeavingRoom(false); }); addToast('LEFT LOBBY'); navigate('/', { replace: true }); }}
+              type="button"
+            >
+              {leavingRoom ? 'LEAVING...' : 'LEAVE'}
+            </button>
+          </div>
+
+          <p className="font-mono text-[10px] uppercase text-rdb-muted text-center">
+            {allReady ? 'All players ready — starting countdown...' : `${readyCount}/${members.length} READY`}
+          </p>
+        </div>
+
+        {/* ── Chat ── */}
+        <div className="rdb-panel p-5">
+          <h2 className="font-mono text-[12px] uppercase text-rdb-orange mb-3">CHAT</h2>
+          <div className="h-48 overflow-y-auto border-y border-rdb-border py-2 mb-3">
+            {messages.map((message) => (
+              <div key={message.id} className="mb-2 font-mono text-[11px] uppercase text-rdb-muted">
+                <Link className={`text-rdb-text hover:underline ${getNameCosmeticClassName(message.profiles)}`} to={`/profile/${message.profiles?.username}`} style={getNameGradientStyle(message.profiles)}>
+                  {message.profiles?.nameplate_icon && <span className="mr-1 text-rdb-orange">{getNameplateEmoji(message.profiles.nameplate_icon)}</span>}
+                  {message.profiles?.username || 'USER'}:
+                </Link>{' '}
+                {message.body}
+              </div>
+            ))}
+            {!messages.length && (
+              <div className="font-mono text-[11px] uppercase text-rdb-muted">No messages yet.</div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="flex gap-2">
+            <input
+              className="rdb-input flex-1"
+              placeholder="TYPE A MESSAGE"
+              value={messageBody}
+              onChange={(e) => setMessageBody(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') sendRoomMessage(); }}
+            />
+            <button className="rdb-button rdb-button-primary" type="button" onClick={sendRoomMessage}>SEND</button>
+          </div>
+        </div>
+      </div>
+    </main>
   ) : (
     <main className="rdb-container-admin">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
 
         {/* ══ MAIN COLUMN ═══════════════════════════════════════════════════ */}
-        <section className="space-y-5">
-          <BattlePrompt battle={battle} />
+        <section key={phase} className="space-y-5 phase-fade">
+          {phase === 'upcoming' && room?.challenge ? (
+            <ChallengeReveal challenge={room.challenge} battleStartsAt={battle?.starts_at} />
+          ) : room?.challenge && phase === 'active' ? (
+            <SampleCard challenge={room.challenge} />
+          ) : (
+            <BattlePrompt battle={battle} />
+          )}
 
           {/* ── Status bar ── */}
           <div className="rdb-panel flex flex-wrap items-center justify-between gap-3 p-4 font-mono text-[11px] uppercase">
@@ -568,7 +787,7 @@ export default function Battle() {
           {/* ── Phase countdown timers ── */}
           {phase === 'upcoming' && phaseEndsAt && !isSolo && (
             <PhaseTimer
-              label="BATTLE STARTS"
+              label="CHALLENGE REVEAL"
               target={new Date(phaseEndsAt).toISOString()}
             />
           )}
@@ -591,11 +810,11 @@ export default function Battle() {
           )}
 
           {/* ── Owner controls ── */}
-          {isOwner && phase === 'upcoming' && (
+          {isOwner && (phase === 'upcoming' || phase === 'lobby') && !isSolo && (
             <div className="rdb-panel p-4 flex flex-wrap items-center justify-between gap-3">
               <span className="font-mono text-[11px] uppercase text-rdb-muted">
-                {isSolo
-                  ? 'SOLO SESSION — READY TO START?'
+                {phase === 'lobby'
+                  ? `${members.length}/${room?.max_players || 4} PLAYERS — READY UP`
                   : `${members.length}/${room?.max_players || 4} PLAYERS — FORCE START AVAILABLE`}
               </span>
               <button
@@ -620,6 +839,23 @@ export default function Battle() {
                 onClick={handleForceClose}
               >
                 {isClosing ? 'CLOSING...' : 'CLOSE BATTLE'}
+              </button>
+            </div>
+          )}
+
+          {/* ── Forfeit button for ranked matches ── */}
+          {room?.mode === 'ranked' && !isSolo && phase !== 'closed' && phase !== 'lobby' && (
+            <div className="rdb-panel p-3 flex items-center justify-between gap-3">
+              <span className="font-mono text-[11px] uppercase text-rdb-muted">
+                LEAVE THE MATCH
+              </span>
+              <button
+                className="rdb-button border-rdb-red text-rdb-red"
+                type="button"
+                disabled={leavingRoom}
+                onClick={leaveRoom}
+              >
+                {leavingRoom ? 'FORFEITING...' : 'FORFEIT'}
               </button>
             </div>
           )}
@@ -657,9 +893,14 @@ export default function Battle() {
                 battle={battle}
                 submissions={submissions}
                 profile={profile}
-                votes={votes}
+                ratings={ratings}
+                descriptions={descriptions}
+                votingStopped={Boolean(myMember?.voting_stopped)}
                 onVoted={async () => {
-                  await reloadVotes();
+                  await reloadRatings();
+                }}
+                onStopVoting={(stopped) => {
+                  addToast(stopped ? 'VOTING LOCKED' : 'VOTING UNLOCKED');
                 }}
               />
             </div>
@@ -668,8 +909,8 @@ export default function Battle() {
           {/* ── Final results (hidden for solo — no voting) ── */}
           {phase === 'closed' && !isSolo && <BattleResults submissions={submissions} />}
 
-          {/* ── Your submission preview (hidden during voting) ── */}
-          {mine && phase !== 'voting' && (
+          {/* ── Your submission preview — hidden during active & voting ── */}
+          {mine && phase === 'closed' && (
             <div className="rdb-panel p-5">
               <h2 className="font-mono text-[13px] uppercase text-rdb-orange">
                 YOUR SUBMISSION
@@ -680,8 +921,8 @@ export default function Battle() {
             </div>
           )}
 
-          {/* ── All submissions — hidden during voting (blind voting) ── */}
-          {phase !== 'voting' && (
+          {/* ── All submissions — hidden until results (blind voting) ── */}
+          {phase === 'closed' && (
           <div className="rdb-panel p-5">
             <h2 className="font-mono text-[13px] uppercase text-rdb-orange mb-3">
               ALL SUBMISSIONS
@@ -719,7 +960,7 @@ export default function Battle() {
                           )}
                         </Link>
                         <span className="font-mono text-[11px] text-rdb-muted">
-                          {formatNumber(sub.vote_count ?? 0)} VOTES
+                          {formatNumber(sub.rating_total ?? sub.vote_count ?? 0)} SCORE
                         </span>
                       </div>
                       <WaveformPlayer url={sub.audio_url} profile={sub.profiles} />
@@ -777,17 +1018,17 @@ export default function Battle() {
                 )}
               </div>
             )}
-            {room?.code_only && room?.join_code && (
+            {room?.room_code && (
               <button
                 className="mt-2 flex items-center gap-1.5 font-mono text-[11px] uppercase text-rdb-orange hover:underline"
                 onClick={() => {
                   playUiSound('click');
-                  navigator.clipboard.writeText(room.join_code);
+                  navigator.clipboard.writeText(room.room_code);
                   addToast('ROOM CODE COPIED');
                 }}
               >
                 <Copy size={12} />
-                CODE: {room.join_code}
+                CODE: {room.room_code}
               </button>
             )}
 
@@ -950,7 +1191,7 @@ export default function Battle() {
         oldTier={winOldTier}
         newTier={winNewTier}
         onPlayAgain={() => navigate('/', { replace: true })}
-        onClose={() => setShowWinModal(false)}
+        onClose={() => { setShowWinModal(false); setTimeout(() => navigate('/', { replace: true }), 500); }}
       />
     </main>
   );

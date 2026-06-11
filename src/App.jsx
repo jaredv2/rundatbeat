@@ -1,24 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Footer from './components/layout/Footer';
 import Navbar from './components/layout/Navbar';
 import FriendsDock from './components/social/FriendsDock';
+
 import ToastNotification from './components/ui/ToastNotification';
 import { useRoomCleanup } from './hooks/useRoomCleanup';
 import { grantDailyLogin } from './lib/tokenHelpers';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
-import Admin from './pages/Admin';
-import Battle from './pages/Battle';
-import Cosmetics from './pages/Cosmetics';
-import Home from './pages/Home';
-import Landing from './pages/Landing';
-import Host from './pages/Host';
-import Leaderboard from './pages/Leaderboard';
-import Login from './pages/Login';
-import Profile from './pages/Profile';
-import Setup from './pages/Setup';
-import Settings from './pages/Settings';
-import Shop from './pages/Shop';
 import { useAuthStore } from './store/authStore';
 import { useUiStore } from './store/uiStore';
 import { playUiSound } from './lib/sfx';
@@ -206,21 +195,9 @@ export default function App() {
     <div className="app-shell bg-rdb-bg text-rdb-text">
       <Navbar />
       <div className="app-content">
-        <Routes>
-          <Route path="/" element={user ? <Home /> : <Landing />} />
-          <Route path="/landing" element={user ? <Navigate to="/" replace /> : <Landing />} />
-          <Route path="/battle/:id" element={<Battle />} />
-          <Route path="/leaderboard" element={<Leaderboard />} />
-          <Route path="/shop" element={<Shop />} />
-          <Route path="/cosmetics" element={<Cosmetics />} />
-          <Route path="/host" element={<Host />} />
-          <Route path="/profile/:username" element={<Profile />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-          <Route path="/setup" element={<Setup />} />
-          <Route path="/admin" element={<Admin />} />
-        </Routes>
+        <Outlet />
       </div>
+
       {user && <FriendsDock />}
       <Footer />
       <ToastNotification />

@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useFriends } from '../../hooks/useFriends';
-import { generateBattlePrompt, GENRE_KNOWLEDGE } from '../../lib/groq';
-import { pickRestrictions } from '../../lib/restrictions';
+import { createRoom } from '../../lib/roomService';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useFriendStore } from '../../store/friendStore';
@@ -253,45 +252,19 @@ export default function FriendsDock() {
     console.log('[cleanup] triggering edge function from createChallengeBattle');
     supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
     try {
-      const diff = ['easy', 'medium', 'medium', 'hard'][Math.floor(Math.random() * 4)];
-      const genre = Object.keys(GENRE_KNOWLEDGE)[Math.floor(Math.random() * Object.keys(GENRE_KNOWLEDGE).length)];
-      const restrictions = pickRestrictions(diff, genre, 3);
-      const directive = `Generate a ${genre} beat battle prompt for a 1v1 challenge match. The genre must be ${genre}. Make the title end with TYPE BEAT. Only generate the title, mood, flavor_text, and reference_keywords. Do NOT generate restrictions.`;
-      const { json } = await generateBattlePrompt({ directive, mode: 'quick', recentGenres: [], difficulty: diff });
-      if (!json || !json.title) throw new Error('Prompt generation failed');
+      const { room } = await createRoom({
+        timerEnabled: true,
+        isPublic: false,
+        hostId: userId1,
+        maxPlayers: 2,
+      });
 
-      const g = GENRE_KNOWLEDGE[genre];
-      const bpm = g ? Math.floor((g.bpm_range[0] + g.bpm_range[1]) / 2) : 140;
-
-      const { data: battle, error: battleError } = await supabase.from('battles').insert({
-        title: json.title, prompt_text: json.flavor_text, genre, bpm,
-        mood: json.mood, restrictions: restrictions.join('; '),
-        reference_artists: Array.isArray(json.reference_keywords) ? json.reference_keywords : [],
-        flavor_text: json.flavor_text, duration_minutes: 45, song_length_seconds: 60,
-        mode: 'quick', status: 'upcoming',
-        starts_at: new Date(Date.now()).toISOString(),
-        voting_ends_at: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
-        created_by: userId1,
-      }).select('id').single();
-      if (battleError) throw battleError;
-
-      const { data: room, error: roomError } = await supabase.from('rooms').insert({
-        name: '1V1 CHALLENGE', owner_id: userId1, battle_id: battle.id,
-        status: 'locked', max_players: 2, current_players: 2, mode: 'quick',
-        is_public: false, song_length_seconds: 60, voting_minutes: 3,
-      }).select('*').single();
-      if (roomError) throw roomError;
-
-      const { error: membersErr } = await supabase.from('room_members').upsert([
-        { room_id: room.id, user_id: userId1, role: 'owner' },
-        { room_id: room.id, user_id: userId2, role: 'member' },
-      ]);
-      if (membersErr) throw membersErr;
-
-      await supabase.from('challenges').update({ battle_id: battle.id }).eq('id', challengeId);
+      await supabase.from('room_members').upsert({ room_id: room.id, user_id: userId2, role: 'member', is_ready: false });
+      await supabase.from('rooms').update({ current_players: 2 }).eq('id', room.id);
+      await supabase.from('challenges').update({ battle_id: null }).eq('id', challengeId);
 
       setOpen(false);
-      navigate(`/battle/${battle.id}`);
+      navigate(`/battle/${room.id}`);
     } catch (err) {
       await supabase.from('challenges').update({ status: 'declined' }).eq('id', challengeId);
       throw err;

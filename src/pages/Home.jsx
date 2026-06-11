@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import MatchmakingModal from '../components/matchmaking/MatchmakingModal';
 import { formatNumber } from '../lib/display';
 import { playUiSound } from '../lib/sfx';
+import { DEFAULT_ELO, tierFromElo } from '../lib/elo';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
@@ -82,9 +83,34 @@ export default function Home() {
   async function leaveCurrentRoom() {
     if (!currentRoom || !profile || busy) return;
     setBusy(true);
+    window.__clearReturnTo?.();
     console.log('[Home] Leaving room:', currentRoom.id);
     try {
-      await supabase.from('room_members').delete().eq('room_id', currentRoom.id).eq('user_id', profile.id);
+      const isRanked = currentRoom.mode === 'ranked';
+
+      await Promise.all([
+        supabase.from('room_members').delete().eq('room_id', currentRoom.id).eq('user_id', profile.id),
+        isRanked && currentRoom.battle_id ? supabase.from('submissions').delete().eq('battle_id', currentRoom.battle_id).eq('user_id', profile.id) : null,
+        isRanked && currentRoom.battle_id ? supabase.from('votes').delete().eq('room_id', currentRoom.id).eq('voter_id', profile.id) : null,
+      ]);
+
+      if (isRanked && currentRoom.battle_id) {
+        const { data: leaverProfile } = await supabase
+          .from('profiles')
+          .select('elo, ranked_losses, battles_entered')
+          .eq('id', profile.id)
+          .maybeSingle();
+        const currentElo = leaverProfile?.elo ?? DEFAULT_ELO;
+        await supabase
+          .from('profiles')
+          .update({
+            elo: Math.max(0, currentElo - 50),
+            rank_tier: tierFromElo(Math.max(0, currentElo - 50)),
+            ranked_losses: (leaverProfile?.ranked_losses || 0) + 1,
+            battles_entered: (leaverProfile?.battles_entered || 0) + 1,
+          })
+          .eq('id', profile.id);
+      }
 
       const { data: remaining } = await supabase
         .from('room_members')
@@ -96,7 +122,7 @@ export default function Home() {
           supabase.from('rooms').update({ status: 'closed' }).eq('id', currentRoom.id),
           supabase.from('battles').update({ status: 'closed', early_closed: false }).eq('id', currentRoom.battle_id).in('status', ['upcoming', 'active', 'voting']),
         ]);
-        addToast('ROOM CLOSED');
+        addToast(isRanked ? 'LEFT MATCH -50 ELO' : 'ROOM CLOSED');
       } else {
         addToast('LEFT ROOM');
       }
@@ -201,7 +227,7 @@ export default function Home() {
         Active players: <b className="text-rdb-orange">{formatNumber(activePlayers)}</b>
       </div>
 
-      <MatchmakingModal open={playOpen} onClose={() => setPlayOpen(false)} onQueued={loadHomeStats} />
+      <MatchmakingModal open={playOpen} onClose={() => setPlayOpen(false)} />
     </main>
   );
 }

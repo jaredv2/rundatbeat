@@ -79,10 +79,8 @@ export default function WaveformPlayer({ url, profile }) {
 
     return () => {
       console.log('[WaveformPlayer] Cleanup — destroying WaveSurfer instance');
-      // Mark as destroyed BEFORE calling destroy() so the error handler
-      // can identify the resulting AbortError as intentional
       destroyedRef.current = true;
-      ws.destroy();
+      try { ws.destroy(); } catch (_) {}
       waveRef.current = null;
     };
   }, [url]); // only re-init when url changes

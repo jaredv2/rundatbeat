@@ -11,6 +11,7 @@ export function playUiSound(type = 'click') {
       queue: [660, 0.045, 0.026],
       success: [880, 0.055, 0.032],
       cancel: [220, 0.04, 0.024],
+      win: [523, 0.08, 0.035],
     };
     const [frequency, duration, volume] = tones[type] || tones.click;
     oscillator.type = 'triangle';
