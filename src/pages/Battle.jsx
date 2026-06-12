@@ -669,7 +669,7 @@ export default function Battle() {
       <div className="mx-auto w-full max-w-2xl space-y-5">
         {phase === 'upcoming' ? (
           room?.challenge?.instructions ? (
-            <SampleCard challenge={room.challenge} />
+            <SampleCard challenge={room.challenge} phase={phase} />
           ) : (
             <div className="rdb-panel p-8 text-center">
               <Spinner label="GENERATING CHALLENGE" />
@@ -679,7 +679,7 @@ export default function Battle() {
             </div>
           )
         ) : room?.challenge && phase === 'active' ? (
-          <SampleCard challenge={room.challenge} />
+          <SampleCard challenge={room.challenge} phase={phase} />
         ) : (
           <BattlePrompt battle={battle} />
         )}
@@ -832,8 +832,8 @@ export default function Battle() {
               roomId={room?.id}
               roomMode={room?.mode}
             />
-          ) : room?.challenge && phase === 'active' ? (
-            <SampleCard challenge={room.challenge} />
+          ) : room?.challenge && (phase === 'active' || phase === 'voting') ? (
+            <SampleCard challenge={room.challenge} phase={phase} />
           ) : (
             <BattlePrompt battle={battle} />
           )}
@@ -1111,7 +1111,7 @@ export default function Battle() {
                       <span className="font-mono text-[10px] uppercase text-rdb-muted">
                         {displayRole}
                       </span>
-                      {(phase === 'active' || phase === 'voting') && (
+                      {phase === 'active' && (
                         <span className={`font-mono text-[9px] uppercase ${submissions.some(s => s.user_id === member.user_id) ? 'text-green-400' : 'text-rdb-muted'}`}>
                           {submissions.some(s => s.user_id === member.user_id) ? 'SUBMITTED' : 'NO SUB'}
                         </span>

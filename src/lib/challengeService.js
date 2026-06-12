@@ -1,7 +1,6 @@
 import { supabase } from './supabase';
 
 const BASE_URL = 'https://loops-api-rdb.vercel.app';
-const PROXY_URL = supabase ? `${supabase.supabaseUrl}/functions/v1/proxy-audio` : null;
 
 export async function getChallengeSample(genre) {
   const params = genre ? `?genre=${encodeURIComponent(genre)}&enrich=true` : '?enrich=true';
@@ -44,9 +43,6 @@ export function buildSamplePayload(sample, restriction, instructions = '', restr
 }
 
 export function getDownloadUrl(loopId) {
-  if (PROXY_URL && loopId) {
-    return `${PROXY_URL}?id=${loopId}`;
-  }
   return `${BASE_URL}/download/${loopId}`;
 }
 
@@ -56,8 +52,12 @@ function extractLoopIdFromUrl(url) {
   if (!url) return null;
   const proxyMatch = url.match(/[?&]id=(\d+)/);
   if (proxyMatch) return proxyMatch[1];
-  const directMatch = url.match(/\/download\/(\d+)/i) || url.match(/\/loop(?:s)?\/(\d+)/i);
-  if (directMatch) return directMatch[1];
+  const apiMatch = url.match(/\/download\/(\d+)/i);
+  if (apiMatch) return apiMatch[1];
+  const loopMatch = url.match(/\/loop(?:s)?\/(\d+)/i);
+  if (loopMatch) return loopMatch[1];
+  const fileIdMatch = url.match(/file_id=(\d+)/i);
+  if (fileIdMatch) return fileIdMatch[1];
   return null;
 }
 
@@ -68,13 +68,11 @@ export async function fetchAudioBlob(url) {
   if (blobCache.has(url)) return blobCache.get(url);
 
   const loopId = extractLoopIdFromUrl(url);
-  const fetchUrl = loopId ? getDownloadUrl(loopId) : url;
+  const fetchUrl = loopId
+    ? `${BASE_URL}/download/${loopId}`
+    : url;
 
-  const { data: { session } } = await supabase.auth.getSession();
-  const headers = {};
-  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
-
-  const res = await fetch(fetchUrl, { headers });
+  const res = await fetch(fetchUrl);
   if (!res.ok) throw new Error(`Audio fetch failed: ${res.status}`);
   const blob = await res.blob();
   const blobUrl = URL.createObjectURL(blob);

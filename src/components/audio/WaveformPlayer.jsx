@@ -55,7 +55,6 @@ function WaveformPlayerInner({ url, profile }) {
         barGap: 2,
         barRadius: 2,
         normalize: true,
-        backend: 'WebAudio',
         fillParent: true,
       });
 
@@ -94,7 +93,6 @@ function WaveformPlayerInner({ url, profile }) {
           if (result && typeof result.catch === 'function') result.catch(() => {});
         } catch (_) {}
       }
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
       waveRef.current = null;
     };
   }, [url]);

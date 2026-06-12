@@ -3,35 +3,34 @@ import WaveformPlayer from '../audio/WaveformPlayer';
 import { getDownloadUrl } from '../../lib/challengeService';
 import { useAuthStore } from '../../store/authStore';
 
-export default function SampleCard({ challenge }) {
+export default function SampleCard({ challenge, phase }) {
   const { profile } = useAuthStore();
   if (!challenge) return null;
 
+  const isVoting = phase === 'voting';
+
   return (
     <div className="rdb-panel p-5">
-      <div className="flex flex-wrap gap-2">
-        <span className="inline-flex items-center gap-1 rounded bg-rdb-orange/20 px-2 py-0.5 font-mono text-[10px] uppercase text-rdb-orange">
-          <Music size={10} />
-          {challenge.genre}
-        </span>
-        {challenge.bpm && (
-          <span className="rounded bg-blue-500/20 px-2 py-0.5 font-mono text-[10px] uppercase text-blue-400">
-            {challenge.bpm} BPM
+      {!isVoting && (
+        <div className="flex flex-wrap gap-2">
+          <span className="inline-flex items-center gap-1 rounded bg-rdb-orange/20 px-2 py-0.5 font-mono text-[10px] uppercase text-rdb-orange">
+            <Music size={10} />
+            {challenge.genre}
           </span>
-        )}
-        {challenge.key && (
-          <span className="rounded bg-purple-500/20 px-2 py-0.5 font-mono text-[10px] uppercase text-purple-400">
-            KEY: {challenge.key}
-          </span>
-        )}
-        {challenge.duration && (
-          <span className="rounded bg-blue-500/20 px-2 py-0.5 font-mono text-[10px] uppercase text-blue-400">
-            {challenge.duration}
-          </span>
-        )}
-      </div>
+          {challenge.bpm && (
+            <span className="rounded bg-blue-500/20 px-2 py-0.5 font-mono text-[10px] uppercase text-blue-400">
+              {challenge.bpm} BPM
+            </span>
+          )}
+          {challenge.key && (
+            <span className="rounded bg-purple-500/20 px-2 py-0.5 font-mono text-[10px] uppercase text-purple-400">
+              KEY: {challenge.key}
+            </span>
+          )}
+        </div>
+      )}
 
-      <h1 className="mt-4 font-mono text-3xl font-bold uppercase text-rdb-text">
+      <h1 className={`${isVoting ? '' : 'mt-4'} font-mono text-3xl font-bold uppercase text-rdb-text`}>
         {challenge.title}
       </h1>
 
@@ -41,7 +40,7 @@ export default function SampleCard({ challenge }) {
         </p>
       )}
 
-      {challenge.tags?.length > 0 && (
+      {!isVoting && challenge.tags?.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {challenge.tags.map((tag) => (
             <span
@@ -56,7 +55,9 @@ export default function SampleCard({ challenge }) {
 
       {challenge.mp3_url && (
         <div className="mt-4">
-          <p className="mb-1 font-mono text-[10px] uppercase text-rdb-muted">PREVIEW</p>
+          <p className="mb-1 font-mono text-[10px] uppercase text-rdb-muted">
+            {isVoting ? 'CURRENT SAMPLE' : 'PREVIEW'}
+          </p>
           <WaveformPlayer url={challenge.mp3_url} profile={profile} />
         </div>
       )}

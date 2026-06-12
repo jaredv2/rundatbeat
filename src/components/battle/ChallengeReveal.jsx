@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Music } from 'lucide-react';
-import SampleCard from './SampleCard';
 import { playUiSound } from '../../lib/sfx';
 import { generateChallengeAsync } from '../../lib/lobbyService';
 import { generateCustomRoomChallenge, generateSoloChallenge } from '../../lib/roomService';
