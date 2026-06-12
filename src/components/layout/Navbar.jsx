@@ -5,6 +5,7 @@ import { useAuthStore } from '../../store/authStore';
 import { playUiSound } from '../../lib/sfx';
 import { getNameCosmeticClassName, getNameGradientStyle } from '../../lib/display';
 import TokenBadge from '../tokens/TokenBadge';
+import NotificationBell from '../notifications/NotificationBell';
 
 function LoginButton() {
   const login = async () => {
@@ -45,10 +46,11 @@ export default function Navbar() {
               <Link className={`font-mono text-[11px] uppercase hover:text-rdb-orange ${getNameCosmeticClassName(profile)}`} style={getNameGradientStyle(profile)} to={`/profile/${profile.username}`}>
                 <User className="inline-block align-[-2px]" size={12} /> {profile.username}
               </Link>
-              {profile.avatar_url && <img className="h-6 w-6 rounded border border-rdb-border object-cover" src={profile.avatar_url} alt="" />}
+              {profile.avatar_url && <img loading="lazy" className="h-6 w-6 rounded border border-rdb-border object-cover" src={profile.avatar_url} alt="" />}
               <Link className="rdb-button hidden sm:inline-flex" to="/cosmetics"><Shirt size={14} />COSMETICS</Link>
               <Link className="rdb-button hidden sm:inline-flex" to="/settings"><Settings size={14} />SETTINGS</Link>
               <button className="rdb-button hidden sm:inline-flex" type="button" onClick={signOut}><LogOut size={14} />LOGOUT</button>
+              <NotificationBell />
             </>
           ) : <LoginButton />}
         </div>

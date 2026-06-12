@@ -13,12 +13,12 @@ const TIER_THRESHOLDS = [
 const TIER_K_FACTOR = {
   bronze: 32,
   silver: 32,
-  gold: 36,
-  platinum: 36,
-  diamond: 40,
-  elite: 40,
-  champion: 44,
-  goat: 48,
+  gold: 32,
+  platinum: 32,
+  diamond: 32,
+  elite: 32,
+  champion: 32,
+  goat: 32,
 };
 
 export function tierFromElo(elo) {
@@ -42,10 +42,7 @@ export function newElo(rating, expected, actual, K) {
 }
 
 export function getPlayerKFactor(playerElo, lobbyAvgElo) {
-  const diff = playerElo - lobbyAvgElo;
-  const baseK = 32;
-  const adjustment = Math.round(Math.max(-16, Math.min(16, diff / 100)));
-  return Math.max(16, Math.min(64, baseK + adjustment));
+  return 32;
 }
 
 export function computeLobbyAverageElo(players) {

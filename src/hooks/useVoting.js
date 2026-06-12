@@ -83,7 +83,15 @@ export function useVoting() {
     });
 
     if (rpcError) {
-      console.warn('[useVoting] RPC unavailable, falling back:', rpcError.message);
+      // Fallback: recompute aggregate from votes table
+      const { data: allVotes } = await supabase
+        .from('votes')
+        .select('rating, weight')
+        .eq('submission_id', submission.id);
+      if (allVotes?.length) {
+        const total = allVotes.reduce((sum, v) => sum + (v.rating || 0) * (v.weight || 1), 0);
+        await supabase.from('submissions').update({ rating_total: total, vote_count: allVotes.length }).eq('id', submission.id);
+      }
     }
 
     return { rating, weight, delta };
@@ -110,7 +118,7 @@ export function useVoting() {
   async function getTotalVoters(battleId) {
     const { count } = await supabase
       .from('room_members')
-      .select('id', { count: 'exact', head: true })
+      .select('room_id', { count: 'exact' })
       .eq('room_id', battleId);
     return count || 0;
   }

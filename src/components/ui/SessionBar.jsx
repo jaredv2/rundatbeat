@@ -48,9 +48,19 @@ export default function SessionBar() {
 
   useEffect(() => {
     loadSession();
-    pollRef.current = setInterval(loadSession, 10000);
+    pollRef.current = setInterval(loadSession, 30000);
     return () => clearInterval(pollRef.current);
   }, [loadSession]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const channel = supabase
+      .channel('session-bar')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members', filter: `user_id=eq.${profile.id}` }, loadSession)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ranked_lobby_members', filter: `user_id=eq.${profile.id}` }, loadSession)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [profile]);
 
   async function handleLeave() {
     if (!session || leaving) return;
@@ -61,7 +71,7 @@ export default function SessionBar() {
         await supabase.from('ranked_lobby_members').delete().eq('lobby_id', session.lobby.id).eq('user_id', profile.id);
       } else {
         await supabase.from('room_members').delete().eq('room_id', session.room.id).eq('user_id', profile.id);
-        const { count } = await supabase.from('room_members').select('room_id', { count: 'exact', head: true }).eq('room_id', session.room.id);
+        const { count } = await supabase.from('room_members').select('room_id', { count: 'exact' }).eq('room_id', session.room.id);
         if (count <= 0) await supabase.from('rooms').update({ status: 'closed' }).eq('id', session.room.id);
       }
       addToast('LEFT SESSION');

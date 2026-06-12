@@ -7,22 +7,30 @@ import { useAuthStore } from '../../store/authStore';
 import { useFriendStore } from '../../store/friendStore';
 import { useUiStore } from '../../store/uiStore';
 import { playUiSound } from '../../lib/sfx';
+import { pushNotification } from '../../lib/pushNotification';
 
 const ONLINE_WINDOW_MS = 2 * 60 * 1000;
 
 export default function FriendsDock() {
   const { profile } = useAuthStore();
   const addToast = useUiStore((s) => s.addToast);
-  const {
-    friends, incomingRequests, outgoingRequests,
-    messagesByFriend, presence, selectedFriendId, unreadByFriend,
-    setSelectedFriendId, setMessages, clearUnread, removeFriend,
-  } = useFriendStore();
+  const friends = useFriendStore((s) => s.friends);
+  const incomingRequests = useFriendStore((s) => s.incomingRequests);
+  const outgoingRequests = useFriendStore((s) => s.outgoingRequests);
+  const messagesByFriend = useFriendStore((s) => s.messagesByFriend);
+  const presence = useFriendStore((s) => s.presence);
+  const selectedFriendId = useFriendStore((s) => s.selectedFriendId);
+  const unreadByFriend = useFriendStore((s) => s.unreadByFriend);
+  const setSelectedFriendId = useFriendStore((s) => s.setSelectedFriendId);
+  const setMessages = useFriendStore((s) => s.setMessages);
+  const clearUnread = useFriendStore((s) => s.clearUnread);
+  const removeFriend = useFriendStore((s) => s.removeFriend);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState('friends');
   const [body, setBody] = useState('');
   const [challenges, setChallenges] = useState([]);
   const [activeGame, setActiveGame] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
 
   const navigate = useNavigate();
 
@@ -93,13 +101,20 @@ export default function FriendsDock() {
   if (!profile) return null;
 
   async function loadMessages(friendId) {
-    const { data } = await supabase
-      .from('friend_messages')
-      .select('*')
-      .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`)
-      .order('created_at', { ascending: true })
-      .limit(50);
-    setMessages(friendId, data || []);
+    setLoadingMessages(true);
+    try {
+      const { data } = await supabase
+        .from('friend_messages')
+        .select('*')
+        .or(`and(sender_id.eq.${profile.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${profile.id})`)
+        .order('created_at', { ascending: true })
+        .limit(50);
+      setMessages(friendId, data || []);
+    } catch {
+      // Silently handle — messages may arrive via realtime
+    } finally {
+      setLoadingMessages(false);
+    }
   }
 
   async function selectFriend(friendId) {
@@ -215,6 +230,11 @@ export default function FriendsDock() {
       if (error) throw error;
       addToast('CHALLENGE SENT');
       loadChallenges();
+      pushNotification(friendId, {
+        type: 'challenge', title: 'CHALLENGE', body: `${profile.username} challenged you to a 1v1!`,
+        link: '/',
+        actorId: profile.id,
+      });
     } catch (err) {
       addToast(err.message || 'CHALLENGE FAILED', 'error');
     }
@@ -249,8 +269,6 @@ export default function FriendsDock() {
   }
 
   async function createChallengeBattle(challengeId, userId1, userId2) {
-    console.log('[cleanup] triggering edge function from createChallengeBattle');
-    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
     try {
       const { room } = await createRoom({
         timerEnabled: true,
@@ -318,7 +336,8 @@ export default function FriendsDock() {
                   </div>
                 );
               })}
-              {!messages.length && <div className="font-mono text-[11px] uppercase text-rdb-muted p-2">No messages yet.</div>}
+              {!messages.length && !loadingMessages && <div className="font-mono text-[11px] uppercase text-rdb-muted p-2">No messages yet.</div>}
+              {loadingMessages && !messages.length && <div className="font-mono text-[11px] uppercase text-rdb-muted p-2">Loading...</div>}
             </div>
 
             {pendingChallenge && (
@@ -374,7 +393,7 @@ export default function FriendsDock() {
                     {incomingRequests.map((req) => (
                       <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-rdb-border bg-rdb-bg p-2" key={req.friendship_id}>
                         <div className="flex items-center gap-2 min-w-0">
-                          {req.avatar_url ? <img className="h-6 w-6 rounded object-cover" src={req.avatar_url} alt="" /> : <div className="h-6 w-6 rounded bg-rdb-surface" />}
+                          {req.avatar_url ? <img loading="lazy" className="h-6 w-6 rounded object-cover" src={req.avatar_url} alt="" /> : <div className="h-6 w-6 rounded bg-rdb-surface" />}
                           <span className="truncate font-mono text-[11px] uppercase text-rdb-text">{req.username}</span>
                         </div>
                         <div className="flex gap-1 shrink-0">
@@ -391,7 +410,7 @@ export default function FriendsDock() {
                     {outgoingRequests.map((req) => (
                       <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-rdb-border bg-rdb-bg p-2" key={req.friendship_id}>
                         <div className="flex items-center gap-2 min-w-0">
-                          {req.avatar_url ? <img className="h-6 w-6 rounded object-cover" src={req.avatar_url} alt="" /> : <div className="h-6 w-6 rounded bg-rdb-surface" />}
+                          {req.avatar_url ? <img loading="lazy" className="h-6 w-6 rounded object-cover" src={req.avatar_url} alt="" /> : <div className="h-6 w-6 rounded bg-rdb-surface" />}
                           <span className="truncate font-mono text-[11px] uppercase text-rdb-text">{req.username}</span>
                         </div>
                         <button className="rdb-button text-[10px] shrink-0" type="button" onClick={() => cancelRequest(req.friendship_id)}>CANCEL</button>
@@ -418,7 +437,7 @@ export default function FriendsDock() {
                       onKeyDown={(e) => { if (e.key === 'Enter') selectFriend(friend.id); }}
                     >
                       <div className="relative shrink-0">
-                        {friend.avatar_url ? <img className="h-8 w-8 rounded-md object-cover" src={friend.avatar_url} alt="" /> : <div className="h-8 w-8 rounded-md bg-rdb-surface" />}
+                        {friend.avatar_url ? <img loading="lazy" className="h-8 w-8 rounded-md object-cover" src={friend.avatar_url} alt="" /> : <div className="h-8 w-8 rounded-md bg-rdb-surface" />}
                         <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-rdb-bg ${online ? 'bg-green-400' : 'bg-rdb-muted'}`} />
                       </div>
                       <span className="min-w-0 flex-1">

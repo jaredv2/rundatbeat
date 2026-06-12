@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Lock, Unlock } from 'lucide-react';
 import WaveformPlayer from '../audio/WaveformPlayer';
 import { useVoting } from '../../hooks/useVoting';
@@ -13,6 +13,12 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
   const [localDescriptions, setLocalDescriptions] = useState(descriptions);
   const [voting, setVoting] = useState(false);
   const [togglingLock, setTogglingLock] = useState(false);
+
+  useEffect(() => {
+    // Only sync from props on initial load or battle change — not after each vote
+    if (Object.keys(localRatings).length === 0) setLocalRatings(ratings);
+  }, [ratings]);
+  useEffect(() => { setLocalDescriptions(descriptions); }, [descriptions]);
 
   const myId = profile?.id;
   const otherSubmissions = submissions.filter((s) => s.user_id && myId && s.user_id !== myId);
@@ -61,6 +67,7 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
       await stopVoting(room?.id || battle.id, myId, newStopped);
       onStopVoting?.(newStopped);
       if (newStopped) addToast('VOTING LOCKED');
+      else addToast('VOTING UNLOCKED');
     } catch (error) {
       addToast(error.message || 'TOGGLE LOCK FAILED', 'error');
     } finally {

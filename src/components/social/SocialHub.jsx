@@ -222,7 +222,7 @@ export default function SocialHub({ producers = [] }) {
         <div className="grid gap-2">
           {friends.map((user) => (
             <button className={`flex h-9 items-center gap-2 border px-2 text-left font-mono text-[11px] uppercase ${friend?.id === user.id ? 'border-rdb-orange text-rdb-orange' : 'border-rdb-border text-rdb-text'}`} key={user.id} type="button" onClick={() => { playUiSound('click'); setFriend(user); }}>
-              {user.avatar_url && <img className="h-5 w-5 border border-rdb-border" src={user.avatar_url} alt="" />}
+              {user.avatar_url && <img loading="lazy" className="h-5 w-5 border border-rdb-border" src={user.avatar_url} alt="" />}
               <span>{user.username}</span>
             </button>
           ))}

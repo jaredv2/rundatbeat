@@ -1,8 +1,9 @@
+import { memo } from 'react';
 import WaveformPlayer from '../audio/WaveformPlayer';
 import { formatNumber } from '../../lib/display';
 import { playUiSound } from '../../lib/sfx';
 
-export default function BlindSubmissionCard({ submission, index, canVote, currentVote = 0, onVote }) {
+function BlindSubmissionCardInner({ submission, index, canVote, currentVote = 0, onVote }) {
   function handleVote(direction) {
     playUiSound(direction > 0 ? 'success' : 'click');
     onVote(direction);
@@ -28,3 +29,13 @@ export default function BlindSubmissionCard({ submission, index, canVote, curren
     </div>
   );
 }
+
+const BlindSubmissionCard = memo(BlindSubmissionCardInner, (prev, next) => {
+  return prev.submission?.id === next.submission?.id
+    && prev.submission?.vote_count === next.submission?.vote_count
+    && prev.index === next.index
+    && prev.canVote === next.canVote
+    && prev.currentVote === next.currentVote;
+});
+
+export default BlindSubmissionCard;

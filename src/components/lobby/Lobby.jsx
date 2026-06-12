@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Copy, Users, X } from 'lucide-react';
+import { Users, X } from 'lucide-react';
 import { kickPlayer, toggleReady, startCountdown, leaveLobby } from '../../lib/roomService';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
@@ -84,28 +84,12 @@ export default function Lobby({ room, members, onReadyChange }) {
     }
   }
 
-  function copyRoomCode() {
-    playUiSound('click');
-    navigator.clipboard.writeText(room.room_code);
-    addToast('ROOM CODE COPIED');
-  }
-
   return (
     <div className="rdb-panel p-5">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-mono text-[13px] uppercase text-rdb-text">
           {isHost ? 'HOST LOBBY' : 'LOBBY'}
         </h3>
-        {room.room_code && (
-          <button
-            className="flex items-center gap-1.5 font-mono text-[11px] uppercase text-rdb-orange hover:underline"
-            onClick={copyRoomCode}
-            type="button"
-          >
-            <Copy size={12} />
-            CODE: {room.room_code}
-          </button>
-        )}
       </div>
 
       {countdown !== null && (

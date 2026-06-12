@@ -8,7 +8,7 @@
  *          refresh, refreshRoomData, optimistic*
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 // ── Reconciliation helpers ────────────────────────────────────────────────
@@ -41,7 +41,15 @@ function reconcileArray(prev, next, keyFn = (item) => item?.id) {
     const key = keyFn(item);
     const old = prevMap.get(key);
     if (!old) { changed = true; return item; }
-    if (JSON.stringify(old) !== JSON.stringify(item)) { changed = true; return item; }
+    // Shallow compare keys — faster than JSON.stringify
+    const oldKeys = Object.keys(old);
+    const newKeys = Object.keys(item);
+    if (oldKeys.length !== newKeys.length) { changed = true; return item; }
+    for (let i = 0; i < oldKeys.length; i++) {
+      const k = oldKeys[i];
+      if (k === 'profiles') continue; // skip nested objects (expensive to compare)
+      if (old[k] !== item[k]) { changed = true; return item; }
+    }
     return old;
   });
   if (result.length !== prev.length) changed = true;
@@ -63,6 +71,7 @@ export function useBattle(id) {
   const [subscribedBattleId, setSubscribedBattleId] = useState(null);
   const [subscribedRoomId, setSubscribedRoomId] = useState(null);
   const refreshingRef = useRef(false);
+  const loadedRef = useRef(false);
 
   // ── Resolve the actual battle_id from raw id (could be room UUID or battle UUID) ──
   async function resolveIds(rawId) {
@@ -80,52 +89,104 @@ export function useBattle(id) {
     if (!supabase || !id) return;
     if (refreshingRef.current) return;
     refreshingRef.current = true;
-    setLoading(true);
+    if (!loadedRef.current) setLoading(true);
 
     try {
       const ids = await resolveIds(id);
       if (ids.roomId) roomIdRef.current = ids.roomId;
-      const actualBattleId = ids.battleId || id;
+      const actualBattleId = ids.battleId || null;
       battleIdRef.current = actualBattleId;
 
-      const queries = [
-        supabase.from('battles').select('*').eq('id', actualBattleId).maybeSingle(),
-        supabase.from('submissions')
-          .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
-          .eq('battle_id', actualBattleId)
-          .order('vote_count', { ascending: false }),
-      ];
-
+      // Load room first (always needed)
+      let loadedRoom = null;
       if (ids.roomId) {
-        queries.push(supabase.from('rooms').select('*').eq('id', ids.roomId).maybeSingle());
-      } else {
-        queries.push(supabase.from('rooms').select('*').eq('battle_id', actualBattleId).maybeSingle());
+        const { data } = await supabase.from('rooms').select('*').eq('id', ids.roomId).maybeSingle();
+        loadedRoom = data ?? null;
+      } else if (actualBattleId) {
+        const { data } = await supabase.from('rooms').select('*').eq('battle_id', actualBattleId).maybeSingle();
+        loadedRoom = data ?? null;
       }
-
-      const [{ data: battleData }, { data: submissionData }, { data: roomData }] = await Promise.all(queries);
-
-      setBattle(prev => mergeObj(prev, battleData ?? null));
-      setSubmissions(prev => reconcileArray(prev, submissionData ?? []));
-
-      let loadedRoom = roomData ?? null;
-      if (!loadedRoom && !ids.roomId) {
-        const { data: directRoom } = await supabase.from('rooms').select('*').eq('id', id).maybeSingle();
-        loadedRoom = directRoom ?? null;
+      // Fallback: direct room lookup by raw id
+      if (!loadedRoom) {
+        const { data } = await supabase.from('rooms').select('*').eq('id', id).maybeSingle();
+        loadedRoom = data ?? null;
         if (loadedRoom?.id) roomIdRef.current = loadedRoom.id;
       }
       setRoom(prev => mergeObj(prev, loadedRoom));
       roomIdRef.current = loadedRoom?.id ?? roomIdRef.current;
 
+      // Load battle + submissions (only if battle exists)
+      if (actualBattleId) {
+        const [{ data: battleData }, { data: submissionData }] = await Promise.all([
+          supabase.from('battles').select('*').eq('id', actualBattleId).maybeSingle(),
+          supabase.from('submissions')
+            .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
+            .eq('battle_id', actualBattleId)
+            .order('vote_count', { ascending: false }),
+        ]);
+        setBattle(prev => mergeObj(prev, battleData ?? null));
+        setSubmissions(prev => reconcileArray(prev, submissionData ?? []));
+      } else {
+        // Custom room with no battle yet — clear stale state
+        setBattle(null);
+        setSubmissions([]);
+      }
+
+      // Load members + chat
       if (loadedRoom?.id) {
         await refreshRoomData(loadedRoom.id);
+      }
+
+      // Auto-join custom room if user is not yet a member
+      if (loadedRoom?.id && loadedRoom.status !== 'closed' && loadedRoom.mode !== 'ranked') {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: existingMember } = await supabase
+            .from('room_members')
+            .select('user_id')
+            .eq('room_id', loadedRoom.id)
+            .eq('user_id', user.id)
+            .maybeSingle();
+          if (!existingMember) {
+            try {
+              if (loadedRoom.status === 'lobby') {
+                const { joinRoom } = await import('../lib/roomService');
+                await joinRoom(loadedRoom.id, user.id);
+              } else {
+                await supabase.from('room_members').insert({
+                  room_id: loadedRoom.id,
+                  user_id: user.id,
+                  role: 'member',
+                  is_ready: false,
+                });
+              }
+              await refreshRoomData(loadedRoom.id);
+            } catch { /* room may be full or closed — ignore */ }
+          }
+        }
+      }
+
+      // Fallback: if room.challenge is missing, try fetching from ranked_lobbies
+      if (loadedRoom && !loadedRoom.challenge && actualBattleId) {
+        const { data: lobbyData } = await supabase
+          .from('ranked_lobbies')
+          .select('challenge')
+          .eq('battle_id', actualBattleId)
+          .maybeSingle();
+        if (lobbyData?.challenge) {
+          loadedRoom = { ...loadedRoom, challenge: lobbyData.challenge };
+          setRoom(prev => mergeObj(prev, loadedRoom));
+          await supabase.from('rooms').update({ challenge: lobbyData.challenge }).eq('id', loadedRoom.id);
+        }
       }
 
       setSubscribedBattleId(battleIdRef.current);
       setSubscribedRoomId(roomIdRef.current);
     } catch (err) {
-      console.error('[useBattle] refresh error:', err);
+      // refresh error — silently ignore (realtime will catch up)
     } finally {
       setLoading(false);
+      loadedRef.current = true;
       refreshingRef.current = false;
     }
   }
@@ -220,136 +281,127 @@ export function useBattle(id) {
       await refresh();
       if (cancelled || !supabase || !id) return;
 
-      const bid = battleIdRef.current || id;
+      const bid = battleIdRef.current;
       const rid = roomIdRef.current;
 
       channel = supabase
-        .channel(`battle-${id}-${bid}-${rid}`)
+        .channel(`battle-${bid || 'none'}-${rid}`)
 
-        // Battle row changes — merge only changed fields
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'battles', filter: `id=eq.${bid}` },
-          (payload) => {
+      // ── Battle-scoped subscriptions (only if battle exists) ──
+      if (bid) {
+        channel = channel
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'battles', filter: `id=eq.${bid}` }, (payload) => {
             setBattle(prev => mergeObj(prev, payload.new));
-          },
-        )
-
-        // Vote changes → reconcile submissions
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'votes', filter: `battle_id=eq.${bid}` },
-          () => { refreshSubmissions(); },
-        )
-
-        // Submission inserts — add optimistically or reconcile
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` },
-          (payload) => {
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'votes', filter: `battle_id=eq.${bid}` }, () => { refreshSubmissions(); })
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` }, (payload) => {
             const sub = payload.new;
             setSubmissions(prev => {
               if (prev.some(s => s.id === sub.id)) return prev;
               return [sub, ...prev];
             });
-          },
-        )
-
-        // Submission updates — merge only changed fields
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` },
-          (payload) => {
+            supabase
+              .from('submissions')
+              .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
+              .eq('id', sub.id)
+              .maybeSingle()
+              .then(({ data }) => { if (data) setSubmissions(prev => prev.map(s => s.id === data.id ? data : s)); });
+          })
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` }, (payload) => {
             const updated = payload.new;
             setSubmissions(prev => prev.map(s => s.id === updated.id ? mergeObj(s, updated) : s));
-          },
-        )
-
-        // Submission deletes — remove
-        .on(
-          'postgres_changes',
-          { event: 'DELETE', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` },
-          (payload) => {
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` }, (payload) => {
             const oldId = payload.old?.id;
             if (oldId) setSubmissions(prev => prev.filter(s => s.id !== oldId));
-          },
-        )
+          });
+      }
 
-        // Room row updates — merge
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'rooms', filter: rid ? `id=eq.${rid}` : `battle_id=eq.${bid}` },
-          (payload) => {
+      // ── Room-scoped subscriptions (always active) ──
+      if (rid) {
+        channel = channel
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${rid}` }, (payload) => {
             const updated = payload.new;
-            const old = payload.old;
             setRoom(prev => mergeObj(prev, updated));
             roomIdRef.current = updated?.id ?? roomIdRef.current;
-            if (updated?.battle_id && !old?.battle_id) {
+            // If a battle was just created for this room, restart subscriptions
+            if (updated?.battle_id && !battleIdRef.current) {
               battleIdRef.current = updated.battle_id;
-              refresh();
+              setSubscribedBattleId(updated.battle_id);
             }
-          },
-        )
+          });
+      }
 
-        // Room members — reconcile individual member
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'room_members' },
-          (payload) => {
-            if (payload.new?.room_id === roomIdRef.current) {
-              const member = payload.new;
-              setMembers(prev => {
-                if (prev.some(m => m.user_id === member.user_id)) return prev;
-                return [...prev, member];
-              });
-            }
-          },
-        )
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'room_members' },
-          (payload) => {
-            if (payload.new?.room_id === roomIdRef.current) {
-              const updated = payload.new;
-              setMembers(prev => prev.map(m => m.user_id === updated.user_id ? mergeObj(m, updated) : m));
-            }
-          },
-        )
-        .on(
-          'postgres_changes',
-          { event: 'DELETE', schema: 'public', table: 'room_members' },
-          (payload) => {
-            const oldUserId = payload.old?.user_id;
-            const oldRoomId = payload.old?.room_id;
-            if (oldRoomId === roomIdRef.current && oldUserId) {
-              setMembers(prev => prev.filter(m => m.user_id !== oldUserId));
-            }
-          },
-        )
-
-        // Chat messages — append
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'room_messages' },
-          (payload) => {
-            if (payload.new?.room_id === roomIdRef.current) {
-              const msg = payload.new;
-              setMessages(prev => {
-                if (prev.some(m => m.id === msg.id)) return prev;
-                return [...prev, msg];
-              });
-            }
-          },
-        )
-
+      channel = channel
+        // Room members — INSERT
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_members' }, (payload) => {
+          if (payload.new?.room_id === roomIdRef.current) {
+            const member = payload.new;
+            setMembers(prev => {
+              if (prev.some(m => m.user_id === member.user_id)) return prev;
+              return [...prev, member];
+            });
+            supabase
+              .from('room_members')
+              .select('role, user_id, is_ready, voting_stopped, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
+              .eq('room_id', member.room_id)
+              .eq('user_id', member.user_id)
+              .maybeSingle()
+              .then(({ data }) => { if (data) setMembers(prev => prev.map(m => m.user_id === data.user_id ? data : m)); });
+          }
+        })
+        // Room members — UPDATE
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'room_members' }, (payload) => {
+          if (payload.new?.room_id === roomIdRef.current) {
+            const updated = payload.new;
+            setMembers(prev => prev.map(m => m.user_id === updated.user_id ? mergeObj(m, updated) : m));
+          }
+        })
+        // Room members — DELETE
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'room_members' }, (payload) => {
+          const oldUserId = payload.old?.user_id;
+          const oldRoomId = payload.old?.room_id;
+          if (oldRoomId === roomIdRef.current && oldUserId) {
+            setMembers(prev => prev.filter(m => m.user_id !== oldUserId));
+          } else if (!oldRoomId && roomIdRef.current) {
+            supabase
+              .from('room_members')
+              .select('role, user_id, is_ready, voting_stopped, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
+              .eq('room_id', roomIdRef.current)
+              .order('joined_at')
+              .then(({ data }) => { if (data) setMembers(prev => reconcileArray(prev, data)); });
+          }
+        })
+        // Chat messages — INSERT
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages' }, (payload) => {
+          if (payload.new?.room_id === roomIdRef.current) {
+            const msg = payload.new;
+            setMessages(prev => {
+              if (prev.some(m => m.id === msg.id)) return prev;
+              return [...prev, msg];
+            });
+            supabase
+              .from('room_messages')
+              .select('*, profiles(username, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon)')
+              .eq('id', msg.id)
+              .maybeSingle()
+              .then(({ data }) => { if (data) setMessages(prev => prev.map(m => m.id === data.id ? data : m)); });
+          }
+        })
         .subscribe();
 
-      // ── Fallback polling — only while IDs unresolved ──
-      if (!rid || !bid) {
+      // ── Fallback polling — only while battle ID is unresolved ──
+      if (!bid) {
         pollTimer = setInterval(() => {
           if (cancelled) { clearInterval(pollTimer); return; }
-          if (roomIdRef.current && battleIdRef.current) {
+          if (battleIdRef.current) {
             clearInterval(pollTimer);
+            // IDs resolved — restart with correct subscriptions
+            cancelled = true;
+            if (channel) supabase.removeChannel(channel);
+            // Trigger re-run by updating subscribed IDs
+            setSubscribedBattleId(battleIdRef.current);
+            setSubscribedRoomId(roomIdRef.current);
             return;
           }
           refresh();
@@ -365,7 +417,7 @@ export function useBattle(id) {
   // eslint-disable-next-line react/exhaustive-deps
   }, [id, subscribedBattleId, subscribedRoomId]);
 
-  return {
+  return useMemo(() => ({
     battle,
     submissions,
     room,
@@ -385,5 +437,5 @@ export function useBattle(id) {
     optimisticRemoveMessage,
     optimisticBattle,
     optimisticRoom,
-  };
+  }), [battle, submissions, room, members, messages, loading]);
 }

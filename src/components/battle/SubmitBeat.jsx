@@ -36,24 +36,30 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
       setError(durationError);
       return;
     }
+    setError('');
     setProgress(20);
-    const audioUrl = await uploadBeat({ battleId: battle.id, userId: profile.id, file });
-    setProgress(70);
-    const { error: insertError } = await supabase.from('submissions').insert({
-      battle_id: battle.id,
-      user_id: profile.id,
-      audio_url: audioUrl,
-      description,
-    });
-    if (insertError) throw insertError;
-    if (battle.mode !== 'solo') {
-      await addTokenTransaction({ userId: profile.id, amount: 10, reason: 'submission', battleId: battle.id });
-      addToast('+10 RDB SUBMISSION REWARD');
-    } else {
-      addToast('BEAT SUBMITTED');
+    try {
+      const audioUrl = await uploadBeat({ battleId: battle.id, userId: profile.id, file });
+      setProgress(70);
+      const { error: insertError } = await supabase.from('submissions').insert({
+        battle_id: battle.id,
+        user_id: profile.id,
+        audio_url: audioUrl,
+        description,
+      });
+      if (insertError) throw insertError;
+      if (battle.mode !== 'solo') {
+        await addTokenTransaction({ userId: profile.id, amount: 10, reason: 'submission', battleId: battle.id });
+        addToast('+10 RDB SUBMISSION REWARD');
+      } else {
+        addToast('BEAT SUBMITTED');
+      }
+      setProgress(100);
+      onSubmitted?.();
+    } catch (err) {
+      addToast(err.message || 'SUBMISSION FAILED', 'error');
+      setProgress(0);
     }
-    setProgress(100);
-    onSubmitted?.();
   }
 
   return (

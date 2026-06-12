@@ -10,14 +10,14 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy } from 'lucide-react';
-import { Link, Navigate, useBlocker, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useBlocker, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import BattlePrompt from '../components/battle/BattlePrompt';
 import BattleResults from '../components/battle/BattleResults';
 import SampleCard from '../components/battle/SampleCard';
 import PremiumGate from '../components/battle/PremiumGate';
 import SubmitBeat from '../components/battle/SubmitBeat';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import Spinner from '../components/ui/Spinner';
 import WinModal from '../components/ui/WinModal';
 import VotingFeed from '../components/voting/VotingFeed';
 import ChallengeReveal from '../components/battle/ChallengeReveal';
@@ -32,7 +32,7 @@ import {
   getNameplateEmoji,
 } from '../lib/display';
 import { DEFAULT_ELO, tierFromElo, computeNewElos, getPlayerKFactor } from '../lib/elo';
-import { toggleReady, leaveLobby } from '../lib/roomService';
+import { toggleReady, leaveLobby, startCountdown } from '../lib/roomService';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
@@ -122,9 +122,12 @@ function VotePulse() {
 
 export default function Battle() {
   const { id }    = useParams();
+  const [searchParams] = useSearchParams();
   const navigate  = useNavigate();
   const { profile } = useAuthStore();
   const addToast  = useUiStore((s) => s.addToast);
+
+  const soloDifficulty = searchParams.get('difficulty') || 'medium';
 
   // useBattle is fully realtime — no polling anywhere below
   const { battle, submissions, room, members, messages, loading, refresh, refreshRoomData, optimisticMessage, optimisticRemoveMessage } =
@@ -152,16 +155,23 @@ export default function Battle() {
   const readyCount = members.filter((m) => m.is_ready).length;
 
   // ── Room state machine ────────────────────────────────────────────────────
-  const { phase, phaseEndsAt, forceStart, forceClose, isSolo } =
+  const { phase, phaseEndsAt, forceStart, forceClose, isSolo, calculatingWinner } =
     useRoomStateMachine({
       battle,
       room,
       profile,
-      onStateChange: (nextPhase) => {
-        console.log('[Battle] FSM state change →', nextPhase);
-        refresh();
+      onStateChange: (newPhase, b, r) => {
+        console.log(`[Battle] PHASE CHANGE → ${newPhase}`, { battleStatus: b?.status, roomStatus: r?.status });
+        if (newPhase === 'active') playUiSound('phase_change');
+        if (newPhase === 'voting') playUiSound('phase_change');
       },
     });
+
+  useEffect(() => {
+    if (phase === 'closed') {
+      console.log('[Battle] STATE MACHINE — phase:', phase, { battleStatus: battle?.status, roomStatus: room?.status });
+    }
+  }, [phase, battle?.status, room?.status]);
 
   // ── Load existing ratings + premium status on mount ─────────────────────────
   useEffect(() => {
@@ -197,12 +207,13 @@ export default function Battle() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── Leave cleanup on tab close / refresh (all phases) ────────────────────
+  // ── Leave cleanup on tab close (ranked rooms only — custom rooms auto-rejoin) ─
   useEffect(() => {
     if (!profile || !room) return;
 
     const doLeave = () => {
       if (selfLeaving.current) return;
+      if (room.mode !== 'ranked') return;
       selfLeaving.current = true;
       const isRankedHost = room.mode === 'ranked' && room.owner_id === profile.id;
       supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id).then(() => {
@@ -215,7 +226,7 @@ export default function Battle() {
             }
           });
         }
-        supabase.from('room_members').select('room_id', { count: 'exact', head: true }).eq('room_id', room.id).then(({ count }) => {
+        supabase.from('room_members').select('room_id', { count: 'exact' }).eq('room_id', room.id).then(({ count }) => {
           if (count <= 0) supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
           else supabase.from('rooms').update({ current_players: count }).eq('id', room.id);
         });
@@ -243,6 +254,32 @@ export default function Battle() {
     return () => cancelAnimationFrame(raf);
   }, [room?.countdown_started_at, phase]);
 
+  // ── Auto-start countdown when all players ready (custom rooms) ──────────
+  const autoStartTriggered = useRef(false);
+  useEffect(() => {
+    if (phase !== 'lobby' || !room?.id || room?.countdown_started_at) return;
+    const owner = profile?.id && (room?.owner_id === profile.id || room?.host_id === profile.id);
+    if (!owner) return;
+    if (members.length < 2 || !members.every((m) => m.is_ready)) {
+      autoStartTriggered.current = false;
+      return;
+    }
+    if (autoStartTriggered.current) return;
+    autoStartTriggered.current = true;
+    startCountdown(room.id).catch(() => { autoStartTriggered.current = false; });
+  }, [phase, profile?.id, room?.id, room?.owner_id, room?.host_id, room?.countdown_started_at, members]);
+
+  // ── Solo: fire AI generation during upcoming phase ─────────────────────
+  const soloAiFired = useRef(false);
+  useEffect(() => {
+    if (!isSolo || phase !== 'upcoming' || !room?.id || soloAiFired.current) return;
+    if (room?.challenge?.instructions) return;
+    soloAiFired.current = true;
+    import('../lib/roomService').then(({ generateSoloChallenge }) => {
+      generateSoloChallenge(room.id, soloDifficulty).catch(() => {});
+    });
+  }, [isSolo, phase, room?.id, room?.challenge?.instructions, soloDifficulty]);
+
   // ── Redirect when kicked (room_members deleted while on page) ─────────────
   const wasMember = useRef(false);
   useEffect(() => {
@@ -256,7 +293,7 @@ export default function Battle() {
     }
   }, [members, profile?.id, loading]);
 
-  // ── Detect win when battle closes ────────────────────────────────────────
+  // ── Detect win/loss when battle closes ────────────────────────────────────
   const wasClosed = useRef(false);
   const oldEloRef = useRef(profile?.elo ?? DEFAULT_ELO);
   const refreshProfile = useAuthStore((s) => s.refreshProfile);
@@ -264,28 +301,52 @@ export default function Battle() {
     if (loading || !profile) return;
     if (phase === 'closed' && !wasClosed.current) {
       wasClosed.current = true;
+      console.log('[Battle] BATTLE CLOSED', { winnerId: battle?.winner_id, myId: profile.id, isRanked, isSolo });
 
       if (battle?.winner_id === profile.id) {
-        console.log('[Win] battle closed, winner detected, querying profile');
+        console.log('[Battle] WIN DETECTED');
+        playUiSound('win');
         setShowWinModal(true);
-        supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle().then(({ data }) => {
+        // Retry ELO fetch — advanceToClosed updates ELO AFTER setting status:closed
+        async function fetchEloWithRetry(attempts = 0) {
+          const { data } = await supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle();
           const newEloVal = data?.elo ?? oldEloRef.current;
+          const gain = newEloVal - oldEloRef.current;
+          if (gain === 0 && attempts < 5) {
+            await new Promise(r => setTimeout(r, 1500));
+            return fetchEloWithRetry(attempts + 1);
+          }
           const newTier = data?.rank_tier || tierFromElo(newEloVal);
           const oldTier = tierFromElo(oldEloRef.current);
-          const gain = newEloVal - oldEloRef.current;
-          console.log('[Win] elo — old:', oldEloRef.current, 'new:', newEloVal, 'gain:', gain, 'tier:', oldTier, '→', newTier);
-          setWinEloGain(gain);
+          setWinEloGain(gain || 1);
           setWinOldTier(oldTier);
           setWinNewTier(newTier);
           refreshProfile();
-        });
+        }
+        fetchEloWithRetry();
         return;
+      }
+
+      if (isRanked && battle?.winner_id && battle.winner_id !== profile.id) {
+        console.log('[Battle] LOSS DETECTED', { winnerId: battle.winner_id });
+        playUiSound('forfeit');
+        async function fetchLossWithRetry(attempts = 0) {
+          const { data } = await supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle();
+          const newEloVal = data?.elo ?? oldEloRef.current;
+          const loss = oldEloRef.current - newEloVal;
+          if (loss === 0 && attempts < 5) {
+            await new Promise(r => setTimeout(r, 1500));
+            return fetchLossWithRetry(attempts + 1);
+          }
+          if (loss > 0) addToast(`ELO LOSS: -${loss}`, 'error');
+          refreshProfile();
+        }
+        fetchLossWithRetry();
       }
 
       if (!isSolo && submissions.length > 0) {
         const sorted = [...submissions].sort((a, b) => (b.rating_total ?? 0) - (a.rating_total ?? 0));
         if (sorted[0]?.user_id === profile.id) {
-          console.log('[Win] battle closed, top submission detected, querying profile');
           setShowWinModal(true);
           supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle().then(({ data }) => {
             const newEloVal = data?.elo ?? oldEloRef.current;
@@ -293,7 +354,6 @@ export default function Battle() {
             const oldTier = tierFromElo(oldEloRef.current);
             let gain = newEloVal - oldEloRef.current;
             if (gain === 0) gain = 1;
-            console.log('[Win] elo — old:', oldEloRef.current, 'new:', newEloVal, 'gain:', gain, 'tier:', oldTier, '→', newTier);
             setWinEloGain(gain);
             setWinOldTier(oldTier);
             setWinNewTier(newTier);
@@ -308,7 +368,10 @@ export default function Battle() {
   const isRankedMatch = room?.mode === 'ranked' && !isSolo;
   const shouldConfirmLeave = isRankedMatch && (phase === 'active' || phase === 'voting');
   useBlocker(
-    useCallback(() => !selfLeaving.current && shouldConfirmLeave, [shouldConfirmLeave])
+    useCallback(() => {
+      if (selfLeaving.current) return false;
+      return shouldConfirmLeave;
+    }, [shouldConfirmLeave])
   );
   useEffect(() => {
     if (!shouldConfirmLeave) return;
@@ -331,9 +394,10 @@ export default function Battle() {
 
   // ── Chat ──────────────────────────────────────────────────────────────────
   async function sendRoomMessage() {
-    playUiSound('click');
+    playUiSound('chat');
     if (!profile || !room || !messageBody.trim()) return;
     const body = messageBody.trim();
+    console.log('[Battle] SEND MESSAGE', { roomId: room.id, body: body.slice(0, 50) });
     setMessageBody('');
     const tempId = `opt-${Date.now()}`;
     optimisticMessage({ id: tempId, room_id: room.id, user_id: profile.id, body, created_at: new Date().toISOString(), profiles: { username: profile.username } });
@@ -352,15 +416,15 @@ export default function Battle() {
   async function handleForceStart() {
     if (isStarting) return;
     playUiSound('click');
+    console.log('[Battle] FORCE START', { roomId: room?.id, battleId: battle?.id, isOwner });
     setIsStarting(true);
     try {
-      console.log('[Battle] Triggering force start for battle:', id);
       await forceStart();
-      // Manually trigger a refresh to ensure the local state catches up immediately
+      console.log('[Battle] FORCE START SUCCESS');
       await Promise.all([refresh(), refreshRoomData()]);
       addToast('BATTLE STARTED');
     } catch (err) {
-      console.error('[Battle] Force start failed:', err);
+      console.error('[Battle] FORCE START FAILED:', err);
       addToast(err.message || 'START FAILED', 'error');
     } finally {
       setIsStarting(false);
@@ -370,13 +434,15 @@ export default function Battle() {
   async function handleForceClose() {
     if (isClosing) return;
     playUiSound('cancel');
+    console.log('[Battle] FORCE CLOSE', { roomId: room?.id, battleId: battle?.id });
     setIsClosing(true);
     try {
       await forceClose();
-      // Manually trigger a refresh
+      console.log('[Battle] FORCE CLOSE SUCCESS');
       await Promise.all([refresh(), refreshRoomData()]);
       addToast('BATTLE CLOSED');
     } catch (err) {
+      console.error('[Battle] FORCE CLOSE FAILED:', err);
       addToast(err.message || 'CLOSE FAILED', 'error');
     } finally {
       setIsClosing(false);
@@ -387,8 +453,6 @@ export default function Battle() {
   async function leaveRoom() {
     if (!profile || !room || leavingRoom) return;
     playUiSound('cancel');
-    console.log('[cleanup] triggering edge function from leaveRoom');
-    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
 
     const isRanked = room.mode === 'ranked';
     if (isRanked && phase !== 'closed') {
@@ -416,6 +480,7 @@ export default function Battle() {
     setLeavingRoom(true);
     setShowDeleteRoomModal(false);
     setShowEarlyLeaveModal(false);
+    console.log('[Battle] EXECUTE LEAVE', { roomId: room.id, battleId: battle?.id, deleteRoom, isRanked: room.mode === 'ranked' });
     try {
       const isRanked = room.mode === 'ranked';
       const preLeaveCount = members?.length || 0;
@@ -428,7 +493,26 @@ export default function Battle() {
         supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id),
         isRanked ? supabase.from('submissions').delete().eq('battle_id', room.battle_id).eq('user_id', profile.id) : null,
         isRanked ? supabase.from('votes').delete().eq('battle_id', room.battle_id).eq('voter_id', profile.id) : null,
+        supabase.from('ranked_lobby_members').delete().eq('user_id', profile.id),
       ]);
+
+      // Recompute rating aggregates for remaining submissions after vote deletion
+      if (isRanked && room.battle_id) {
+        const { data: remainingSubs } = await supabase
+          .from('submissions')
+          .select('id')
+          .eq('battle_id', room.battle_id);
+        for (const sub of remainingSubs || []) {
+          const { data: votes } = await supabase
+            .from('votes')
+            .select('rating, weight')
+            .eq('submission_id', sub.id);
+          if (votes?.length) {
+            const total = votes.reduce((sum, v) => sum + (v.rating || 0) * (v.weight || 1), 0);
+            await supabase.from('submissions').update({ rating_total: total, vote_count: votes.length }).eq('id', sub.id);
+          }
+        }
+      }
 
       if (isRanked && room.owner_id === profile.id) {
         const { data: remainingMembers } = await supabase
@@ -556,8 +640,8 @@ export default function Battle() {
 
   // ── Guards ────────────────────────────────────────────────────────────────
   if (!profile) return <Navigate to="/login" replace />;
-  if (loading)  return <main className="rdb-container font-mono text-rdb-orange blink">LOADING...</main>;
-  if (!battle && !room)  return <main className="rdb-container font-mono text-rdb-red">BATTLE NOT FOUND</main>;
+  if (loading)  return <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center"><Spinner label="LOADING BATTLE" /></main>;
+  if (!battle && !room)  return <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center"><Spinner label="BATTLE NOT FOUND" /></main>;
 
   const mine          = submissions.find((s) => s.user_id === profile.id);
   const premiumLocked = battle?.is_premium && !paid;
@@ -566,6 +650,7 @@ export default function Battle() {
   const songSeconds   = room?.song_length_seconds || battle?.song_length_seconds || null;
   const isVotingPhase = phase === 'voting';
   const isRanked      = room?.mode === 'ranked';
+  const isOwner       = profile?.id && (room?.owner_id === profile.id || room?.host_id === profile.id);
   const visibleSubmissions = isRanked && phase === 'active'
     ? submissions.filter((s) => s.user_id === profile.id)
     : submissions;
@@ -582,24 +667,21 @@ export default function Battle() {
   return isSolo ? (
     <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center py-12">
       <div className="mx-auto w-full max-w-2xl space-y-5">
-        {room?.challenge && phase === 'active' ? (
+        {phase === 'upcoming' ? (
+          room?.challenge?.instructions ? (
+            <SampleCard challenge={room.challenge} />
+          ) : (
+            <div className="rdb-panel p-8 text-center">
+              <Spinner label="GENERATING CHALLENGE" />
+              <p className="mt-3 font-mono text-[10px] uppercase text-rdb-muted">
+                Preparing your session...
+              </p>
+            </div>
+          )
+        ) : room?.challenge && phase === 'active' ? (
           <SampleCard challenge={room.challenge} />
         ) : (
           <BattlePrompt battle={battle} />
-        )}
-
-        {phase === 'upcoming' && (
-          <div className="rdb-panel p-5 text-center">
-            <p className="font-mono text-[11px] uppercase text-rdb-muted">SOLO SESSION — READY TO START?</p>
-            <button
-              className="rdb-button rdb-button-primary mt-4"
-              type="button"
-              disabled={isStarting}
-              onClick={handleForceStart}
-            >
-              {isStarting ? 'STARTING...' : 'START NOW'}
-            </button>
-          </div>
         )}
         {phase === 'active' && (
           <div className="rdb-panel p-5 text-center">
@@ -645,16 +727,6 @@ export default function Battle() {
           <p className="mt-1 font-mono text-[11px] uppercase text-rdb-muted">
             LOBBY — {members.length}/{room?.max_players || 4} PLAYERS
           </p>
-          {room?.room_code && (
-            <button
-              className="mt-2 inline-flex items-center gap-1.5 font-mono text-[12px] uppercase text-rdb-orange hover:underline"
-              onClick={() => { playUiSound('click'); navigator.clipboard.writeText(room.room_code); addToast('ROOM CODE COPIED'); }}
-              type="button"
-            >
-              <Copy size={13} />
-              ROOM CODE: {room.room_code}
-            </button>
-          )}
         </div>
 
         {/* ── Player list ── */}
@@ -692,23 +764,38 @@ export default function Battle() {
           </div>
         </div>
 
+        {/* ── Lobby countdown reveal ── */}
+        {countdown !== null && (
+          <ChallengeReveal
+            challenge={room?.challenge}
+            endsAt={room?.countdown_started_at ? new Date(new Date(room.countdown_started_at).getTime() + 5000).toISOString() : null}
+            hideChallenge
+          />
+        )}
+
         {/* ── Ready / Start controls ── */}
+        {!room?.countdown_started_at && (
         <div className="rdb-panel p-5 flex flex-col items-center gap-3">
-          {countdown !== null && (
-            <div className="flex flex-col items-center gap-2 w-full">
-              <div className="font-mono text-[12px] uppercase text-rdb-orange blink">
-                {countdown > 0 ? `GAME STARTING IN ${countdown}s` : 'STARTING...'}
-              </div>
-              <div className="h-1.5 w-full max-w-[240px] overflow-hidden rounded-full bg-white/10">
-                <div className="h-full rounded-full bg-rdb-orange transition-all duration-1000" style={{ width: `${((5 - countdown) / 5) * 100}%` }} />
-              </div>
-            </div>
+
+          {isOwner && !room?.countdown_started_at && (
+            <button
+              className="w-full h-11 rdb-button rdb-button-primary font-mono text-[12px] uppercase font-bold"
+              disabled={members.length < 2}
+              onClick={() => {
+                playUiSound('click');
+                startCountdown(room.id).catch((err) => {
+                  addToast(err.message || 'START FAILED', 'error');
+                });
+              }}
+              type="button"
+            >
+              {allReady ? 'START NOW' : 'START ANYWAY'}
+            </button>
           )}
 
           <div className="flex items-center gap-3 w-full">
             <button
               className={`flex-1 h-11 font-mono text-[12px] uppercase font-bold ${myMember?.is_ready ? 'rdb-button border-rdb-orange text-rdb-orange' : 'rdb-button rdb-button-primary'}`}
-              disabled={countdown !== null}
               onClick={() => { playUiSound('click'); toggleReady(room.id, profile.id).then(() => refresh()); }}
               type="button"
             >
@@ -716,7 +803,7 @@ export default function Battle() {
             </button>
             <button
               className="h-11 px-6 rdb-button border-rdb-red text-rdb-red font-mono text-[12px] uppercase"
-              disabled={countdown !== null || leavingRoom}
+              disabled={leavingRoom}
               onClick={() => { setLeavingRoom(true); playUiSound('cancel'); leaveLobby(room.id, profile.id).finally(() => { setLeavingRoom(false); }); addToast('LEFT LOBBY'); navigate('/', { replace: true }); }}
               type="button"
             >
@@ -725,49 +812,26 @@ export default function Battle() {
           </div>
 
           <p className="font-mono text-[10px] uppercase text-rdb-muted text-center">
-            {allReady ? 'All players ready — starting countdown...' : `${readyCount}/${members.length} READY`}
+            {allReady ? 'All players ready' : `${readyCount}/${members.length} READY`}
           </p>
         </div>
-
-        {/* ── Chat ── */}
-        <div className="rdb-panel p-5">
-          <h2 className="font-mono text-[12px] uppercase text-rdb-orange mb-3">CHAT</h2>
-          <div className="h-48 overflow-y-auto border-y border-rdb-border py-2 mb-3">
-            {messages.map((message) => (
-              <div key={message.id} className="mb-2 font-mono text-[11px] uppercase text-rdb-muted">
-                <Link className={`text-rdb-text hover:underline ${getNameCosmeticClassName(message.profiles)}`} to={`/profile/${message.profiles?.username}`} style={getNameGradientStyle(message.profiles)}>
-                  {message.profiles?.nameplate_icon && <span className="mr-1 text-rdb-orange">{getNameplateEmoji(message.profiles.nameplate_icon)}</span>}
-                  {message.profiles?.username || 'USER'}:
-                </Link>{' '}
-                {message.body}
-              </div>
-            ))}
-            {!messages.length && (
-              <div className="font-mono text-[11px] uppercase text-rdb-muted">No messages yet.</div>
-            )}
-            <div ref={chatEndRef} />
-          </div>
-          <div className="flex gap-2">
-            <input
-              className="rdb-input flex-1"
-              placeholder="TYPE A MESSAGE"
-              value={messageBody}
-              onChange={(e) => setMessageBody(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') sendRoomMessage(); }}
-            />
-            <button className="rdb-button rdb-button-primary" type="button" onClick={sendRoomMessage}>SEND</button>
-          </div>
-        </div>
+        )}
       </div>
     </main>
   ) : (
     <main className="rdb-container-admin">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-
         {/* ══ MAIN COLUMN ═══════════════════════════════════════════════════ */}
         <section key={phase} className="space-y-5 phase-fade">
-          {phase === 'upcoming' && room?.challenge ? (
-            <ChallengeReveal challenge={room.challenge} battleStartsAt={battle?.starts_at} />
+          {phase === 'upcoming' ? (
+            <ChallengeReveal
+              challenge={room?.challenge}
+              endsAt={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : battle?.starts_at}
+              countdownDuration={15}
+              battleId={battle?.id}
+              roomId={room?.id}
+              roomMode={room?.mode}
+            />
           ) : room?.challenge && phase === 'active' ? (
             <SampleCard challenge={room.challenge} />
           ) : (
@@ -794,12 +858,6 @@ export default function Battle() {
           </div>
 
           {/* ── Phase countdown timers ── */}
-          {phase === 'upcoming' && phaseEndsAt && !isSolo && (
-            <PhaseTimer
-              label="CHALLENGE REVEAL"
-              target={new Date(phaseEndsAt).toISOString()}
-            />
-          )}
           {phase === 'upcoming' && isSolo && (
             <div className="rdb-panel p-3 font-mono text-[11px] uppercase text-rdb-muted">
               PRACTICE MODE — NO TIMER. START WHEN READY.
@@ -880,23 +938,20 @@ export default function Battle() {
             </div>
           )}
 
-          {/* ── Final results (hidden for solo — no voting) ── */}
-          {phase === 'closed' && !isSolo && <BattleResults submissions={submissions} />}
-
-          {/* ── Your submission preview — hidden during active & voting ── */}
-          {mine && phase === 'closed' && (
-            <div className="rdb-panel p-5">
-              <h2 className="font-mono text-[13px] uppercase text-rdb-orange">
-                YOUR SUBMISSION
-              </h2>
-              <div className="mt-3">
-                <WaveformPlayer url={mine.audio_url} profile={profile} />
-              </div>
+          {/* ── Calculating winner loading overlay ── */}
+          {calculatingWinner && (
+            <div className="rdb-panel p-8 text-center">
+              <Spinner label="CALCULATING VOTES" />
+              <p className="mt-3 font-mono text-[10px] uppercase text-rdb-muted">
+                DETERMINING WINNER...
+              </p>
             </div>
           )}
 
-          {/* ── All submissions — hidden until results (blind voting) ── */}
-          {phase === 'closed' && (
+          {phase === 'closed' && !isSolo && <BattleResults submissions={submissions} />}
+
+          {/* ── All submissions — hidden until results (blind voting; hidden for ranked) ── */}
+          {phase === 'closed' && !isRanked && (
           <div className="rdb-panel p-5">
             <h2 className="font-mono text-[13px] uppercase text-rdb-orange mb-3">
               ALL SUBMISSIONS
@@ -918,9 +973,11 @@ export default function Battle() {
                       className={`rdb-panel p-4 ${isOwn ? 'border-rdb-orange/40' : ''}`}
                     >
                       <div className="mb-3 flex items-center justify-between gap-2">
-                        <Link
+                        <a
                           className={`font-mono text-sm font-bold uppercase hover:underline ${getNameCosmeticClassName(sub.profiles)}`}
-                          to={`/profile/${sub.profiles?.username}`}
+                          href={`/profile/${sub.profiles?.username}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           style={getNameGradientStyle(sub.profiles)}
                         >
                           {sub.profiles?.nameplate_icon && (
@@ -932,7 +989,7 @@ export default function Battle() {
                           {isOwn && (
                             <span className="ml-2 text-[10px] text-rdb-muted">(YOU)</span>
                           )}
-                        </Link>
+                        </a>
                         <span className="font-mono text-[11px] text-rdb-muted">
                           {formatNumber(sub.rating_total ?? sub.vote_count ?? 0)} SCORE
                         </span>
@@ -992,19 +1049,6 @@ export default function Battle() {
                 )}
               </div>
             )}
-            {room?.room_code && (
-              <button
-                className="mt-2 flex items-center gap-1.5 font-mono text-[11px] uppercase text-rdb-orange hover:underline"
-                onClick={() => {
-                  playUiSound('click');
-                  navigator.clipboard.writeText(room.room_code);
-                  addToast('ROOM CODE COPIED');
-                }}
-              >
-                <Copy size={12} />
-                CODE: {room.room_code}
-              </button>
-            )}
 
             {/* ── VOTE BUTTON — visible only in voting phase ── */}
             {isVotingPhase && isMember && (
@@ -1042,28 +1086,45 @@ export default function Battle() {
 
             {/* ── Members list ── */}
             <div className="mt-3 grid gap-2">
-              {members.map((member) => (
-                <div
-                  key={member.user_id}
-                  className="flex items-center justify-between gap-2 rounded border border-rdb-border bg-rdb-bg px-2 py-2"
-                >
-                  <Link
-                    className={`min-w-0 truncate font-mono text-[11px] uppercase hover:underline ${getNameCosmeticClassName(member.profiles)}`}
-                    to={`/profile/${member.profiles?.username}`}
-                    style={getNameGradientStyle(member.profiles)}
+              {members.map((member) => {
+                const displayRole = isRanked && member.role === 'owner' ? 'member' : member.role;
+                return (
+                  <div
+                    key={member.user_id}
+                    className="flex items-center justify-between gap-2 rounded border border-rdb-border bg-rdb-bg px-2 py-2"
                   >
-                    {member.profiles?.nameplate_icon && (
-                      <span className="mr-1 text-rdb-orange">
-                        {getNameplateEmoji(member.profiles.nameplate_icon)}
+                    <a
+                      className={`min-w-0 truncate font-mono text-[11px] uppercase hover:underline ${getNameCosmeticClassName(member.profiles)}`}
+                      href={`/profile/${member.profiles?.username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={getNameGradientStyle(member.profiles)}
+                    >
+                      {member.profiles?.nameplate_icon && (
+                        <span className="mr-1 text-rdb-orange">
+                          {getNameplateEmoji(member.profiles.nameplate_icon)}
+                        </span>
+                      )}
+                      {member.profiles?.username || 'USER'}
+                    </a>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] uppercase text-rdb-muted">
+                        {displayRole}
                       </span>
-                    )}
-                    {member.profiles?.username || 'USER'}
-                  </Link>
-                  <span className="font-mono text-[10px] uppercase text-rdb-muted">
-                    {member.role}
-                  </span>
-                </div>
-              ))}
+                      {(phase === 'active' || phase === 'voting') && (
+                        <span className={`font-mono text-[9px] uppercase ${submissions.some(s => s.user_id === member.user_id) ? 'text-green-400' : 'text-rdb-muted'}`}>
+                          {submissions.some(s => s.user_id === member.user_id) ? 'SUBMITTED' : 'NO SUB'}
+                        </span>
+                      )}
+                      {member.voting_stopped && phase === 'voting' && (
+                        <span className="font-mono text-[9px] uppercase text-green-400">
+                          VOTE LOCKED
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
               {!members.length && (
                 <div className="rounded border border-rdb-border bg-rdb-bg p-3 font-mono text-[11px] uppercase text-rdb-muted">
                   {isSolo ? 'Solo session — just you.' : 'No room members loaded.'}
@@ -1081,9 +1142,11 @@ export default function Battle() {
                   key={message.id}
                   className="mb-2 font-mono text-[11px] uppercase text-rdb-muted"
                 >
-                  <Link
+                  <a
                     className={`text-rdb-text hover:underline ${getNameCosmeticClassName(message.profiles)}`}
-                    to={`/profile/${message.profiles?.username}`}
+                    href={`/profile/${message.profiles?.username}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     style={getNameGradientStyle(message.profiles)}
                   >
                     {message.profiles?.nameplate_icon && (
@@ -1092,7 +1155,7 @@ export default function Battle() {
                       </span>
                     )}
                     {message.profiles?.username || 'USER'}:
-                  </Link>{' '}
+                  </a>{' '}
                   {message.body}
                 </div>
               ))}
@@ -1164,8 +1227,8 @@ export default function Battle() {
         eloChange={winEloGain}
         oldTier={winOldTier}
         newTier={winNewTier}
-        onPlayAgain={() => { selfLeaving.current = true; navigate('/', { replace: true }); }}
-        onClose={() => { setShowWinModal(false); selfLeaving.current = true; setTimeout(() => navigate('/', { replace: true }), 500); }}
+        onPlayAgain={() => { selfLeaving.current = true; window.__clearReturnTo?.(); navigate('/', { replace: true }); }}
+        onClose={() => setShowWinModal(false)}
       />
     </main>
   );

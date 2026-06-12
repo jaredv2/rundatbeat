@@ -41,7 +41,7 @@ export default function WinModal({ open, eloChange, oldTier, newTier, onPlayAgai
   const rankedDown = displayOld && displayNew && displayOld !== displayNew && eloChange < 0;
 
   return (
-    <div className="win-modal-overlay" onClick={() => { playUiSound('cancel'); onClose(); }}>
+    <div className="win-modal-overlay">
       <div className="win-modal" onClick={(e) => e.stopPropagation()}>
         <button className="win-modal-close" type="button" onClick={() => { playUiSound('cancel'); onClose(); }}><X size={16} /></button>
         <div className="win-modal-glow" />

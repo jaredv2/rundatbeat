@@ -15,7 +15,8 @@ export const useAuthStore = create((set, get) => ({
   refreshProfile: async () => {
     const user = get().user;
     if (!user || !supabase) return null;
-    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if (error || !data) return get().profile;
     set({ profile: data });
     return data;
   },

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, Music, Timer, Users, Wand2, X } from 'lucide-react';
+import { Music, Timer, Users, Wand2, X } from 'lucide-react';
 import { difficultyFromTier } from '../../lib/groq';
 import { createRoom } from '../../lib/roomService';
 import { enterQueue as enterLobbyQueue } from '../../lib/lobbyService';
@@ -11,20 +11,20 @@ import { useUiStore } from '../../store/uiStore';
 
 const DEFAULT_ROOM_SETUP = {
   name: 'PRIVATE STUDIO',
-  battleStartSeconds: 60,
-  battleMinutes: 35,
+  battleMinutes: 45,
   songLengthSeconds: 60,
   votingMinutes: 3,
-  isPublic: true,
+  maxPlayers: 4,
   soloDifficulty: 'medium',
 };
 
-export default function MatchmakingModal({ open, onClose }) {
+export default function MatchmakingModal({ open, onClose, onQueue }) {
   const { profile } = useAuthStore();
   const addToast = useUiStore((s) => s.addToast);
   const navigate = useNavigate();
   const [tab, setTab] = useState('ranked');
   const [visibleRooms, setVisibleRooms] = useState([]);
+  const [roomsLoading, setRoomsLoading] = useState(true);
   const [roomSetup, setRoomSetup] = useState(DEFAULT_ROOM_SETUP);
   const [status, setStatus] = useState('idle');
   const queueingRef = useRef(false);
@@ -33,41 +33,49 @@ export default function MatchmakingModal({ open, onClose }) {
 
   useEffect(() => {
     if (!open) return;
-    loadRooms();
+    loadRooms(true);
     const channel = supabase
       .channel('matchmaking-rooms')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => loadRooms())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members' }, () => loadRooms())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [open]);
 
   if (!open) return null;
 
-  async function loadRooms() {
-    const { data } = await supabase
-      .from('rooms')
-      .select('*, room_members(count), battles(status)')
-      .in('status', ['open', 'locked'])
-      .neq('mode', 'ranked')
-      .eq('is_public', true)
-      .order('created_at', { ascending: false })
-      .limit(12);
-    setVisibleRooms(data || []);
+  async function loadRooms(isInitial = false) {
+    if (isInitial) setRoomsLoading(true);
+    try {
+      const { data } = await supabase
+        .from('rooms')
+        .select('*, room_members(count), battles(status)')
+        .in('status', ['open', 'locked', 'lobby'])
+        .neq('mode', 'ranked')
+        .eq('is_public', true)
+        .order('created_at', { ascending: false })
+        .limit(12);
+      setVisibleRooms(data || []);
+    } catch {
+      // Silently handle
+    } finally {
+      if (isInitial) setRoomsLoading(false);
+    }
   }
 
   async function enterQueueHandler() {
     if (!profile || status === 'busy' || queueingRef.current) return;
     queueingRef.current = true;
     setStatus('busy');
-    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
 
     try {
+      await supabase.from('ranked_lobby_members').delete().eq('user_id', profile.id);
       const lobby = await enterLobbyQueue(profile.id);
       playUiSound('queue');
-      addToast('SEARCHING FOR PLAYERS');
       queueingRef.current = false;
-      navigate(`/lobby/${lobby.id}`);
+      setStatus('idle');
       onClose();
+      onQueue?.(lobby);
     } catch (error) {
       setStatus('idle');
       queueingRef.current = false;
@@ -79,16 +87,18 @@ export default function MatchmakingModal({ open, onClose }) {
     playUiSound('click');
     if (!profile || status === 'busy') return;
     setStatus('busy');
-    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
     try {
       const setup = normalizeRoomSetup(roomSetup);
-      const { room, roomCode } = await createRoom({
-        timerEnabled: setup.battleStartSeconds > 0,
-        isPublic: setup.isPublic,
+      const { room } = await createRoom({
+        isPublic: true,
         hostId: profile.id,
-        maxPlayers: 8,
+        maxPlayers: setup.maxPlayers,
+        battleMinutes: setup.battleMinutes,
+        songLengthSeconds: setup.songLengthSeconds,
+        votingMinutes: setup.votingMinutes,
+        name: roomSetup.name,
       });
-      addToast(`ROOM CREATED — CODE: ${roomCode}`);
+      addToast('ROOM CREATED');
       onClose();
       navigate(`/battle/${room.id}`);
     } catch (error) {
@@ -101,53 +111,24 @@ export default function MatchmakingModal({ open, onClose }) {
     playUiSound('click');
     if (!profile || status === 'busy') return;
     setStatus('busy');
-    supabase.functions.invoke('cleanup-stale-data').then((r) => console.log('[cleanup] done:', r)).catch(() => {});
 
     try {
-      const s = roomSetup;
-      const { buildChallenge, buildSamplePayload } = await import('../../lib/challengeService');
-      const { generateBattlePrompt, flattenRestrictions } = await import('../../lib/groq');
-
-      const genres = ['trap', 'drill', 'boom-bap', 'house', 'lo-fi', 'r&b', 'phonk', 'jersey-club', 'drum-and-bass', 'pluggnb'];
-      const genre = genres[Math.floor(Math.random() * genres.length)];
-      const challenge = await buildChallenge(genre);
-      const challengePayload = buildSamplePayload(challenge.sample, challenge.restriction);
-
-      const { json: aiJson } = await generateBattlePrompt({
-        genre: challengePayload.genre,
-        mode: 'solo',
-        difficulty: s.soloDifficulty === 'expert' ? 'hard' : s.soloDifficulty === 'impossible' ? 'very_hard' : s.soloDifficulty,
-        loopTitle: challengePayload.title,
-        loopBpm: challengePayload.bpm,
-        loopKey: challengePayload.key,
-      });
-
-      const restrictionsText = flattenRestrictions(aiJson.restrictions) || aiJson.restrictions_text || '';
-      challengePayload.instructions = aiJson.instruction || '';
-      challengePayload.restrictionsList = restrictionsText;
-
-      const startDelay = 0;
-      const starts = new Date(Date.now() + startDelay * 1000);
-      const duration = 35;
-      const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
-
       const { data: battle, error: battleError } = await supabase.from('battles').insert({
-        title: aiJson.title || challengePayload.title,
-        prompt_text: aiJson.instruction || '',
-        genre: challengePayload.genre,
-        bpm: challengePayload.bpm,
-        mood: aiJson.flavor_text || aiJson.mood || '',
-        restrictions: restrictionsText,
+        title: 'SOLO SESSION',
+        prompt_text: '',
+        genre: 'trap',
+        mood: '',
+        restrictions: '',
         reference_artists: [],
-        flavor_text: aiJson.flavor_text || '',
-        duration_minutes: duration,
+        flavor_text: '',
+        duration_minutes: 35,
         song_length_seconds: 60,
         mode: 'solo',
         status: 'upcoming',
-        starts_at: starts.toISOString(),
-        voting_ends_at: votingEnds.toISOString(),
+        starts_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        voting_ends_at: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
         created_by: profile.id,
-      }).select('id, title').single();
+      }).select('id').single();
       if (battleError) throw battleError;
 
       const { data: room, error: roomError } = await supabase.from('rooms').insert({
@@ -158,11 +139,11 @@ export default function MatchmakingModal({ open, onClose }) {
         max_players: 1,
         current_players: 1,
         mode: 'solo',
-        battle_starts_in_seconds: startDelay,
+        battle_starts_in_seconds: 0,
         song_length_seconds: 60,
         voting_minutes: 0,
         is_public: false,
-        challenge: challengePayload,
+        challenge: null,
       }).select('*').single();
       if (roomError) throw roomError;
 
@@ -173,9 +154,9 @@ export default function MatchmakingModal({ open, onClose }) {
       });
       if (membersErr) throw membersErr;
 
-      addToast('SOLO SESSION STARTED');
+      addToast('SOLO SESSION CREATED');
       onClose();
-      navigate(`/battle/${battle.id}`);
+      navigate(`/battle/${battle.id}?difficulty=${roomSetup.soloDifficulty}`);
     } catch (error) {
       addToast(error.message || 'SOLO START FAILED', 'error');
     } finally {
@@ -274,6 +255,8 @@ export default function MatchmakingModal({ open, onClose }) {
               <div className="grid gap-2 max-h-[400px] overflow-y-auto pr-1 mt-3">
                 {visibleRooms.map((room) => {
                   const isOwner = room.owner_id === profile?.id;
+                  const memberCount = room.room_members?.[0]?.count || room.current_players || 0;
+                  const isFull = memberCount >= (room.max_players || 4);
                   return (
                     <div className="grid gap-2 rounded-lg border border-rdb-border bg-rdb-surface p-3" key={room.id}>
                       <span>
@@ -281,21 +264,31 @@ export default function MatchmakingModal({ open, onClose }) {
                         <span className="block font-mono text-[10px] uppercase text-rdb-muted">{room.battles?.status || room.status}</span>
                       </span>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-[11px] uppercase text-rdb-muted">{room.room_members?.[0]?.count || room.current_players || 0}/{room.max_players || 4}</span>
-                        {isOwner && (
-                          <button className="rdb-button" disabled={status === 'busy'} type="button" onClick={async () => {
-                            playUiSound('cancel');
-                            await supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
-                            await supabase.from('room_members').delete().eq('room_id', room.id);
-                            addToast('ROOM REMOVED');
-                            loadRooms();
-                          }}>REMOVE</button>
-                        )}
+                        <span className={`font-mono text-[11px] uppercase ${isFull ? 'text-rdb-red' : 'text-rdb-muted'}`}>{memberCount}/{room.max_players || 4}{isFull ? ' FULL' : ''}</span>
+                        <div className="flex gap-2">
+                          {!isOwner && !isFull && (
+                            <button className="rdb-button rdb-button-primary" disabled={status === 'busy'} type="button" onClick={async () => {
+                              playUiSound('click');
+                              navigate(`/battle/${room.battle_id || room.id}`);
+                              onClose();
+                            }}>JOIN</button>
+                          )}
+                          {isOwner && (
+                            <button className="rdb-button" disabled={status === 'busy'} type="button" onClick={async () => {
+                              playUiSound('cancel');
+                              await supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
+                              await supabase.from('room_members').delete().eq('room_id', room.id);
+                              addToast('ROOM REMOVED');
+                              loadRooms();
+                            }}>REMOVE</button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
                 })}
-                {!visibleRooms.length && <div className="rounded-lg border border-rdb-border bg-rdb-surface p-3 text-sm text-rdb-muted">No public rooms yet.</div>}
+                {!visibleRooms.length && roomsLoading && <div className="rounded-lg border border-rdb-border bg-rdb-surface p-3 text-sm text-rdb-muted">Loading rooms...</div>}
+                {!visibleRooms.length && !roomsLoading && <div className="rounded-lg border border-rdb-border bg-rdb-surface p-3 text-sm text-rdb-muted">No public rooms yet.</div>}
               </div>
             </div>
             <div className="rounded-lg border border-rdb-border bg-rdb-bg/70 p-3">
@@ -305,23 +298,30 @@ export default function MatchmakingModal({ open, onClose }) {
                   <input className="rdb-input" value={roomSetup.name} onChange={(event) => updateRoomSetup('name', event.target.value)} />
                 </LabeledField>
                 <div className="grid grid-cols-2 gap-2">
-                  <LabeledField icon={<Clock size={13} />} label="Start Timer">
-                    <input className="rdb-input" min="0" max="600" type="number" value={roomSetup.battleStartSeconds} onChange={(event) => updateRoomSetup('battleStartSeconds', event.target.value)} />
-                  </LabeledField>
                   <LabeledField icon={<Timer size={13} />} label="Battle Min">
                     <input className="rdb-input" min="1" type="number" value={roomSetup.battleMinutes} onChange={(event) => updateRoomSetup('battleMinutes', event.target.value)} />
                   </LabeledField>
+                  <LabeledField icon={<Music size={13} />} label="Song Length Sec">
+                    <input className="rdb-input" min="15" type="number" value={roomSetup.songLengthSeconds} onChange={(event) => updateRoomSetup('songLengthSeconds', event.target.value)} />
+                  </LabeledField>
                 </div>
-                <LabeledField icon={<Music size={13} />} label="Song Length Sec">
-                  <input className="rdb-input" min="15" type="number" value={roomSetup.songLengthSeconds} onChange={(event) => updateRoomSetup('songLengthSeconds', event.target.value)} />
-                </LabeledField>
                 <LabeledField icon={<Timer size={13} />} label="Voting Min">
                   <input className="rdb-input" min="1" max="60" type="number" value={roomSetup.votingMinutes} onChange={(event) => updateRoomSetup('votingMinutes', event.target.value)} />
                 </LabeledField>
-                <label className="flex items-center justify-between gap-3 border border-rdb-border bg-rdb-bg/60 p-2 font-mono text-[11px] uppercase text-rdb-muted">
-                  <span className="inline-flex items-center gap-2"><Users size={13} />Public</span>
-                  <input type="checkbox" checked={roomSetup.isPublic} onChange={(event) => updateRoomSetup('isPublic', event.target.checked)} />
-                </label>
+                <div className="border border-rdb-border bg-rdb-bg/60 p-2">
+                  <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-muted"><Users size={13} />Max Players: {roomSetup.maxPlayers}</span>
+                  <input
+                    className="w-full accent-rdb-orange"
+                    type="range"
+                    min="2"
+                    max="10"
+                    value={roomSetup.maxPlayers}
+                    onChange={(event) => updateRoomSetup('maxPlayers', Number(event.target.value))}
+                  />
+                  <div className="flex justify-between font-mono text-[9px] uppercase text-rdb-muted">
+                    <span>2</span><span>10</span>
+                  </div>
+                </div>
               </div>
               <button className="apple-primary-action mt-3 w-full" disabled={status === 'busy'} type="button" onClick={createRoomBattle}>
                 {status === 'busy' ? 'Creating...' : 'Create'}
@@ -341,11 +341,10 @@ export default function MatchmakingModal({ open, onClose }) {
 function normalizeRoomSetup(setup) {
   return {
     name: String(setup.name || 'PRIVATE STUDIO').trim().slice(0, 40).toUpperCase(),
-    battleStartSeconds: clamp(Number(setup.battleStartSeconds), 0, 600),
     battleMinutes: clamp(Number(setup.battleMinutes), 1, Number.MAX_SAFE_INTEGER),
     songLengthSeconds: clamp(Number(setup.songLengthSeconds), 15, 10000),
     votingMinutes: clamp(Number(setup.votingMinutes), 1, 60),
-    isPublic: Boolean(setup.isPublic),
+    maxPlayers: clamp(Number(setup.maxPlayers), 2, 10),
   };
 }
 

@@ -1,42 +1,49 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import App from './App.jsx';
-import Admin from './pages/Admin';
-import Battle from './pages/Battle';
-import Cosmetics from './pages/Cosmetics';
+import Spinner from './components/ui/Spinner';
+
+const Admin = React.lazy(() => import('./pages/Admin'));
+const Battle = React.lazy(() => import('./pages/Battle'));
+const Cosmetics = React.lazy(() => import('./pages/Cosmetics'));
+const Home = React.lazy(() => import('./pages/Home'));
+const Host = React.lazy(() => import('./pages/Host'));
+const Landing = React.lazy(() => import('./pages/Landing'));
+const Lobby = React.lazy(() => import('./pages/Lobby'));
+const Leaderboard = React.lazy(() => import('./pages/Leaderboard'));
+const Login = React.lazy(() => import('./pages/Login'));
+const Profile = React.lazy(() => import('./pages/Profile'));
+const Setup = React.lazy(() => import('./pages/Setup'));
+const Settings = React.lazy(() => import('./pages/Settings'));
+const Shop = React.lazy(() => import('./pages/Shop'));
+
 import GuestRoute from './components/auth/GuestRoute';
-import Home from './pages/Home';
-import Host from './pages/Host';
-import Landing from './pages/Landing';
-import Lobby from './pages/Lobby';
-import Leaderboard from './pages/Leaderboard';
-import Login from './pages/Login';
 import PrivateRoute from './components/auth/PrivateRoute';
-import Profile from './pages/Profile';
-import Setup from './pages/Setup';
-import Settings from './pages/Settings';
-import Shop from './pages/Shop';
 import './index.css';
+
+function LazyPage({ children }) {
+  return <Suspense fallback={<main className="grid min-h-[calc(100vh-88px)] place-items-center"><Spinner label="LOADING" /></main>}>{children}</Suspense>;
+}
 
 const router = createBrowserRouter([
   {
     path: '/',
     element: <App />,
     children: [
-      { index: true, element: <PrivateRoute><Home /></PrivateRoute> },
-      { path: 'landing', element: <GuestRoute><Landing /></GuestRoute> },
-      { path: 'battle/:id', element: <PrivateRoute><Battle /></PrivateRoute> },
-      { path: 'lobby/:id', element: <PrivateRoute><Lobby /></PrivateRoute> },
-      { path: 'leaderboard', element: <Leaderboard /> },
-      { path: 'shop', element: <PrivateRoute><Shop /></PrivateRoute> },
-      { path: 'cosmetics', element: <PrivateRoute><Cosmetics /></PrivateRoute> },
-      { path: 'host', element: <PrivateRoute><Host /></PrivateRoute> },
-      { path: 'profile/:username', element: <Profile /> },
-      { path: 'settings', element: <PrivateRoute><Settings /></PrivateRoute> },
-      { path: 'login', element: <GuestRoute><Login /></GuestRoute> },
-      { path: 'setup', element: <PrivateRoute><Setup /></PrivateRoute> },
-      { path: 'admin', element: <PrivateRoute><Admin /></PrivateRoute> },
+      { index: true, element: <PrivateRoute><LazyPage><Home /></LazyPage></PrivateRoute> },
+      { path: 'landing', element: <GuestRoute><LazyPage><Landing /></LazyPage></GuestRoute> },
+      { path: 'battle/:id', element: <PrivateRoute><LazyPage><Battle /></LazyPage></PrivateRoute> },
+      { path: 'lobby/:id', element: <PrivateRoute><LazyPage><Lobby /></LazyPage></PrivateRoute> },
+      { path: 'leaderboard', element: <LazyPage><Leaderboard /></LazyPage> },
+      { path: 'shop', element: <PrivateRoute><LazyPage><Shop /></LazyPage></PrivateRoute> },
+      { path: 'cosmetics', element: <PrivateRoute><LazyPage><Cosmetics /></LazyPage></PrivateRoute> },
+      { path: 'host', element: <PrivateRoute><LazyPage><Host /></LazyPage></PrivateRoute> },
+      { path: 'profile/:username', element: <LazyPage><Profile /></LazyPage> },
+      { path: 'settings', element: <PrivateRoute><LazyPage><Settings /></LazyPage></PrivateRoute> },
+      { path: 'login', element: <GuestRoute><LazyPage><Login /></LazyPage></GuestRoute> },
+      { path: 'setup', element: <PrivateRoute><LazyPage><Setup /></LazyPage></PrivateRoute> },
+      { path: 'admin', element: <PrivateRoute><LazyPage><Admin /></LazyPage></PrivateRoute> },
     ],
   },
 ]);

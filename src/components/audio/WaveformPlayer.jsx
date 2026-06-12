@@ -1,102 +1,111 @@
-import { useEffect, useRef, useState } from 'react';
-import WaveSurfer from 'wavesurfer.js';
+import { memo, useEffect, useRef, useState } from 'react';
 import { getThemeStyle } from '../../lib/display';
 import { playUiSound } from '../../lib/sfx';
+import { fetchAudioBlob } from '../../lib/challengeService';
 
-export default function WaveformPlayer({ url, profile }) {
+let WaveSurfer = null;
+let wavesurferPromise = null;
+
+function loadWaveSurfer() {
+  if (WaveSurfer) return Promise.resolve(WaveSurfer);
+  if (wavesurferPromise) return wavesurferPromise;
+  wavesurferPromise = import('wavesurfer.js').then((mod) => {
+    WaveSurfer = mod.default;
+    return WaveSurfer;
+  });
+  return wavesurferPromise;
+}
+
+function WaveformPlayerInner({ url, profile }) {
   const containerRef = useRef(null);
   const waveRef = useRef(null);
-  // Track whether the current instance is being destroyed so we can
-  // ignore the AbortError that WaveSurfer fires when destroy() cancels the fetch
   const destroyedRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const theme = getThemeStyle(profile);
   const waveColor = theme.accent;
   const progressColor = profile?.active_theme ? `${theme.accent}99` : '#22d3ee';
 
   useEffect(() => {
-    if (!containerRef.current || !url) {
-      console.warn('[WaveformPlayer] Skipping init — missing container or url', { url });
-      return undefined;
-    }
+    if (!containerRef.current || !url) return undefined;
 
-    console.log('[WaveformPlayer] Initialising WaveSurfer for url:', url);
-
-    // Reset flags for this mount
     destroyedRef.current = false;
     setReady(false);
     setError(false);
     setPlaying(false);
+    setLoaded(false);
 
-    const ws = WaveSurfer.create({
-      container: containerRef.current,
-      waveColor,
-      progressColor,
-      cursorWidth: 0,
-      height: 56,
-      barWidth: 2,
-      barGap: 2,
-      barRadius: 2,
-      normalize: true,
-      backend: 'WebAudio',
-      fillParent: true,
-    });
+    let ws = null;
+    let blobUrl = null;
 
-    waveRef.current = ws;
+    async function init() {
+      const WS = await loadWaveSurfer();
+      if (destroyedRef.current || !containerRef.current) return;
 
-    ws.on('ready', () => {
-      // Guard: if destroy() was called before ready fired, ignore
-      if (destroyedRef.current) {
-        console.log('[WaveformPlayer] ready fired after destroy — ignoring');
-        return;
+      ws = WS.create({
+        container: containerRef.current,
+        waveColor,
+        progressColor,
+        cursorWidth: 0,
+        height: 56,
+        barWidth: 2,
+        barGap: 2,
+        barRadius: 2,
+        normalize: true,
+        backend: 'WebAudio',
+        fillParent: true,
+      });
+
+      waveRef.current = ws;
+
+      ws.on('ready', () => {
+        if (destroyedRef.current) return;
+        setReady(true);
+        setLoaded(true);
+      });
+
+      ws.on('finish', () => setPlaying(false));
+
+      ws.on('error', (err) => {
+        if (destroyedRef.current || err?.name === 'AbortError') return;
+        setError(true);
+      });
+
+      try {
+        const resolvedUrl = await fetchAudioBlob(url);
+        if (destroyedRef.current) return;
+        blobUrl = resolvedUrl === url ? null : resolvedUrl;
+        ws.load(resolvedUrl);
+      } catch {
+        if (!destroyedRef.current) setError(true);
       }
-      console.log('[WaveformPlayer] WaveSurfer ready:', url);
-      setReady(true);
-    });
+    }
 
-    ws.on('finish', () => {
-      console.log('[WaveformPlayer] Playback finished');
-      setPlaying(false);
-    });
-
-    ws.on('error', (err) => {
-      // KEY FIX: AbortError means destroy() cancelled the in-flight fetch.
-      // This is expected during cleanup (React Strict Mode unmount, url change, etc.)
-      // It is NOT a real audio error — do not show "AUDIO UNAVAILABLE"
-      if (destroyedRef.current || err?.name === 'AbortError') {
-        console.log('[WaveformPlayer] Suppressed AbortError from destroy():', err?.message);
-        return;
-      }
-      console.error('[WaveformPlayer] Real WaveSurfer error:', err);
-      setError(true);
-    });
-
-    ws.load(url);
-    console.log('[WaveformPlayer] load() called for:', url);
+    init();
 
     return () => {
-      console.log('[WaveformPlayer] Cleanup — destroying WaveSurfer instance');
       destroyedRef.current = true;
-      try { ws.destroy(); } catch (_) {}
+      if (ws) {
+        try {
+          const result = ws.destroy();
+          if (result && typeof result.catch === 'function') result.catch(() => {});
+        } catch (_) {}
+      }
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
       waveRef.current = null;
     };
-  }, [url]); // only re-init when url changes
+  }, [url]);
 
-  // Live-update colors without remounting
   useEffect(() => {
     if (!waveRef.current || !ready) return;
-    console.log('[WaveformPlayer] Updating colors — accent:', waveColor);
     waveRef.current.setOptions({ waveColor, progressColor });
   }, [waveColor, progressColor, ready]);
 
   function handlePlayPause() {
-    if (!waveRef.current || !ready) {
-      console.warn('[WaveformPlayer] Play attempted before ready');
-      return;
-    }
+    if (!waveRef.current || !ready) return;
     playUiSound('click');
     waveRef.current.playPause();
     setPlaying((v) => !v);
@@ -110,7 +119,7 @@ export default function WaveformPlayer({ url, profile }) {
         disabled={!ready}
         onClick={handlePlayPause}
       >
-        {playing ? 'PAUSE' : 'PLAY'}
+        {!loaded ? 'LOADING' : playing ? 'PAUSE' : 'PLAY'}
       </button>
 
       <div
@@ -119,7 +128,6 @@ export default function WaveformPlayer({ url, profile }) {
         style={{ background: 'transparent' }}
       />
 
-      {/* Only show on genuine load errors, never on AbortError */}
       {error && (
         <span className="font-mono text-[10px] uppercase text-rdb-muted">
           AUDIO UNAVAILABLE
@@ -128,3 +136,9 @@ export default function WaveformPlayer({ url, profile }) {
     </div>
   );
 }
+
+const WaveformPlayer = memo(WaveformPlayerInner, (prev, next) => {
+  return prev.url === next.url && prev.profile?.active_theme === next.profile?.active_theme && prev.profile?.accent_color === next.profile?.accent_color;
+});
+
+export default WaveformPlayer;

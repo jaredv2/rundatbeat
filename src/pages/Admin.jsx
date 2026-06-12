@@ -165,7 +165,7 @@ export default function Admin() {
   useEffect(() => {
     if (!supabase) return;
     loadRef.current();
-    const interval = setInterval(() => loadRef.current(), 3000);
+    const interval = setInterval(() => loadRef.current(), 30000);
     return () => clearInterval(interval);
   }, []);
 

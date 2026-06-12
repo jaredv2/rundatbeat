@@ -22,11 +22,12 @@ export default function Host() {
     setError('');
     setStatus('creating');
     try {
-      const genres = ['trap', 'drill', 'boom-bap', 'house', 'lo-fi', 'r&b', 'phonk', 'jersey-club', 'drum-and-bass', 'pluggnb'];
+      const genres = ['trap', 'hip-hop', 'edm', 'rap', 'house', 'uk-drill'];
       const genre = genres[Math.floor(Math.random() * genres.length)];
       const { json } = await generateBattlePrompt({
         genre,
         mode: 'room',
+        playerCount: 2,
         loopTitle: `${genre} loop`,
         loopBpm: '140',
         loopKey: 'Am',

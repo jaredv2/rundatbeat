@@ -5,12 +5,15 @@ import Navbar from './components/layout/Navbar';
 import FriendsDock from './components/social/FriendsDock';
 
 import ToastNotification from './components/ui/ToastNotification';
+import Spinner from './components/ui/Spinner';
 import { useRoomCleanup } from './hooks/useRoomCleanup';
+import { useNotifications } from './hooks/useNotifications';
 import { grantDailyLogin } from './lib/tokenHelpers';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { useAuthStore } from './store/authStore';
 import { useUiStore } from './store/uiStore';
 import { playUiSound } from './lib/sfx';
+import './lib/debug';
 
 async function cleanupStaleRooms(userId) {
   if (!supabase) return;
@@ -56,7 +59,6 @@ function usePageTitle() {
     // Exact match
     if (ROUTE_TITLES[path]) {
       document.title = ROUTE_TITLES[path];
-      console.log('[usePageTitle] set (exact):', document.title);
       return;
     }
 
@@ -64,20 +66,17 @@ function usePageTitle() {
     if (path.startsWith('/profile/')) {
       const username = path.split('/profile/')[1]?.split('/')[0]?.toUpperCase() || '';
       document.title = username ? `${username} — RUNDATBEAT` : 'RUNDATBEAT — PROFILE';
-      console.log('[usePageTitle] set (profile):', document.title);
       return;
     }
 
     // /battle/:id — generic battle title (Battle page loads the real name async)
     if (path.startsWith('/battle/')) {
       document.title = 'RUNDATBEAT — BATTLE';
-      console.log('[usePageTitle] set (battle):', document.title);
       return;
     }
 
     // Fallback
     document.title = 'RUNDATBEAT';
-    console.log('[usePageTitle] set (fallback):', document.title);
   }, [location.pathname]);
 }
 
@@ -117,6 +116,7 @@ export default function App() {
   // Updates document.title on every route change
   usePageTitle();
   useRoomCleanup();
+  useNotifications();
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return undefined; }
@@ -162,7 +162,7 @@ export default function App() {
       const since = new Date(Date.now() - 2 * 60 * 1000).toISOString();
       const { count } = await supabase
         .from('user_presence')
-        .select('user_id', { count: 'exact', head: true })
+        .select('user_id', { count: 'exact' })
         .gte('last_seen_at', since);
       if (count > 0) {
         const { data: peak } = await supabase
@@ -186,14 +186,16 @@ export default function App() {
   }, [location.pathname, profile?.id]);
 
   if (!isSupabaseConfigured) return <MissingConfig />;
-  if (!authReady) return <main className="grid min-h-screen place-items-center font-mono text-rdb-orange">LOADING...</main>;
+  if (!authReady) return <main className="grid min-h-screen place-items-center"><Spinner label="AUTHENTICATING" /></main>;
   if (profile?.banned_until && new Date(profile.banned_until).getTime() > Date.now()) {
     return <BannedAccount profile={profile} onLogout={async () => { await useAuthStore.getState().logout(); navigate('/login', { replace: true }); }} />;
   }
 
+  const hideNav = location.pathname.startsWith('/lobby/') || location.pathname.startsWith('/battle/');
+
   return (
     <div className="app-shell bg-rdb-bg text-rdb-text">
-      <Navbar />
+      {!hideNav && <Navbar />}
       <div className="app-content">
         <Outlet />
       </div>

@@ -86,7 +86,7 @@ export default function Profile() {
         <div className="grid gap-4 md:grid-cols-[1fr_270px]">
           <div className="bg-rdb-bg/30 p-5">
             <div className="flex flex-col items-center gap-5 text-center sm:flex-row sm:text-left">
-              {profile.avatar_url ? <img className="h-28 w-28 rounded-lg object-cover shadow-[0_0_28px_rgba(255,157,0,0.16)]" src={profile.avatar_url} alt="" /> : <div className="grid h-28 w-28 place-items-center rounded-lg bg-rdb-bg text-4xl">🎧</div>}
+              {profile.avatar_url ? <img loading="lazy" className="h-28 w-28 rounded-lg object-cover shadow-[0_0_28px_rgba(255,157,0,0.16)]" src={profile.avatar_url} alt="" /> : <div className="grid h-28 w-28 place-items-center rounded-lg bg-rdb-bg text-4xl">🎧</div>}
               <div className="min-w-0">
                 <h1 className={`truncate font-mono text-4xl font-bold uppercase leading-none ${getNameCosmeticClassName(profile)}`} style={getNameGradientStyle(profile)}>
                   {profile.nameplate_icon && <span className="mr-2 text-3xl text-rdb-orange">{getNameplateEmoji(profile.nameplate_icon)}</span>}
