@@ -11,8 +11,6 @@ export function difficultyFromTier(tier) {
 
 const GENRE_RESTRICTION_GUIDE = {
   trap: '808 slides/glides, hi-hat rolls (triplets, 1/32), snare/clap patterns, open hat placement, melody loops, dark/bright FX.',
-  hiphop: 'boom-bap swing, kick/snare interplay, sample chops, scratch FX, vinyl crackle, lo-fi texture.',
-  edm: 'sidechain pumping, risers/downlifters, build-ups, drops, filter sweeps, layered synths, four-on-the-floor kick patterns.',
 };
 
 function bpmHints(bpm) {

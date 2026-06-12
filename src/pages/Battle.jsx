@@ -306,20 +306,18 @@ export default function Battle() {
       // All retries failed — write a basic fallback challenge
       addToast('AI UNAVAILABLE — USING BASIC CHALLENGE');
       const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
-      const genres = ['trap', 'edm', 'hip-hop'];
-      const genre = genres[Math.floor(Math.random() * genres.length)];
-      const data = await buildChallenge(genre);
+      const data = await buildChallenge('trap');
       const sample = data.sample || data;
       const payload = buildSamplePayload(sample, data.restriction || '');
-      payload.instructions = `Make a ${genre} beat that matches the vibe of "${sample.title}".`;
+      payload.instructions = `Make a trap beat that matches the vibe of "${sample.title}".`;
       payload.restrictionsList = '';
       await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
       const starts = new Date();
       const votingEnds = new Date(starts.getTime() + 35 * 60 * 1000);
       await supabase.from('battles').update({
-        title: `${genre.toUpperCase()} PRACTICE`,
+        title: `TRAP PRACTICE`,
         prompt_text: payload.instructions,
-        genre,
+        genre: 'trap',
         bpm: sample.bpm,
         restrictions: '',
         status: 'upcoming',
@@ -1098,7 +1096,7 @@ export default function Battle() {
                       <span className="font-mono text-[10px] uppercase text-rdb-muted">
                         {displayRole}
                       </span>
-        {phase === 'active' && isOwner && (
+                      {phase === 'active' && (
                         <span className={`font-mono text-[9px] uppercase ${submissions.some(s => s.user_id === member.user_id) ? 'text-green-400' : 'text-rdb-muted'}`}>
                           {submissions.some(s => s.user_id === member.user_id) ? 'SUBMITTED' : 'NO SUB'}
                         </span>

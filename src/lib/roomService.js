@@ -134,9 +134,6 @@ export async function advanceLobbyToActive(roomId) {
 
 // Fetch sample + generate AI challenge for a custom room (called during challenge reveal)
 export async function generateCustomRoomChallenge(roomId) {
-  const genres = ['trap', 'edm', 'hip-hop'];
-  const genre = genres[Math.floor(Math.random() * genres.length)];
-
   const { count: playerCount } = await supabase
     .from('room_members')
     .select('room_id', { count: 'exact' })
@@ -145,7 +142,7 @@ export async function generateCustomRoomChallenge(roomId) {
   const { buildChallenge, buildSamplePayload } = await import('./challengeService');
   const { generateBattlePrompt, flattenRestrictions } = await import('./groq');
 
-  const data = await buildChallenge(genre);
+  const data = await buildChallenge('trap');
   const sample = data.sample || data;
   const restriction = data.restriction || '';
   const challengePayload = buildSamplePayload(sample, restriction);
@@ -195,13 +192,10 @@ export async function generateCustomRoomChallenge(roomId) {
 
 // Fetch sample + generate AI challenge for solo session (called during challenge reveal)
 export async function generateSoloChallenge(roomId, difficulty = 'medium') {
-  const genres = ['trap', 'edm', 'hip-hop'];
-  const genre = genres[Math.floor(Math.random() * genres.length)];
-
   const { buildChallenge, buildSamplePayload } = await import('./challengeService');
   const { generateBattlePrompt, flattenRestrictions } = await import('./groq');
 
-  const data = await buildChallenge(genre);
+  const data = await buildChallenge('trap');
   const sample = data.sample || data;
   const restriction = data.restriction || '';
   const challengePayload = buildSamplePayload(sample, restriction);

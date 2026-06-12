@@ -22,13 +22,11 @@ export default function Host() {
     setError('');
     setStatus('creating');
     try {
-      const genres = ['trap', 'edm', 'hip-hop'];
-      const genre = genres[Math.floor(Math.random() * genres.length)];
       const { json } = await generateBattlePrompt({
-        genre,
+        genre: 'trap',
         mode: 'room',
         playerCount: 2,
-        loopTitle: `${genre} loop`,
+        loopTitle: 'trap loop',
         loopBpm: '140',
         loopKey: 'Am',
       });
@@ -41,7 +39,7 @@ export default function Host() {
       const { data, error: insertError } = await supabase.from('battles').insert({
         title: json.title,
         prompt_text: json.instruction || '',
-        genre,
+        genre: 'trap',
         bpm: json.bpm || 140,
         mood: json.flavor_text || json.mood || '',
         restrictions: restrictionsText,

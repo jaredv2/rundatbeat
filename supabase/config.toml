@@ -2,4 +2,4 @@
 verify_jwt = false
 
 [functions.groq-proxy]
-verify_jwt = true
+verify_jwt = false
