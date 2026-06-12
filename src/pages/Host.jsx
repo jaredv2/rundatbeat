@@ -22,7 +22,7 @@ export default function Host() {
     setError('');
     setStatus('creating');
     try {
-      const genres = ['trap', 'hip-hop', 'edm', 'rap', 'house', 'uk-drill'];
+      const genres = ['trap', 'hip-hop', 'uk-drill', 'rap'];
       const genre = genres[Math.floor(Math.random() * genres.length)];
       const { json } = await generateBattlePrompt({
         genre,

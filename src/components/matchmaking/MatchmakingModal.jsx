@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Music, Timer, Users, Wand2, X } from 'lucide-react';
 import { difficultyFromTier } from '../../lib/groq';
-import { createRoom } from '../../lib/roomService';
+import { createRoom, deleteRoom } from '../../lib/roomService';
 import { enterQueue as enterLobbyQueue } from '../../lib/lobbyService';
 import { playUiSound } from '../../lib/sfx';
 import { supabase } from '../../lib/supabase';
@@ -276,9 +276,8 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                           {isOwner && (
                             <button className="rdb-button" disabled={status === 'busy'} type="button" onClick={async () => {
                               playUiSound('cancel');
-                              await supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
-                              await supabase.from('room_members').delete().eq('room_id', room.id);
-                              addToast('ROOM REMOVED');
+                              await deleteRoom(room.id);
+                              addToast('ROOM DELETED');
                               loadRooms();
                             }}>REMOVE</button>
                           )}

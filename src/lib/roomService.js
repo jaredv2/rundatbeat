@@ -126,7 +126,7 @@ export async function advanceLobbyToActive(roomId) {
 
 // Fetch sample + generate AI challenge for a custom room (called during challenge reveal)
 export async function generateCustomRoomChallenge(roomId) {
-  const genres = ['trap', 'hip-hop', 'edm', 'rap', 'house', 'uk-drill'];
+  const genres = ['trap', 'hip-hop', 'uk-drill', 'rap'];
   const genre = genres[Math.floor(Math.random() * genres.length)];
 
   const { count: playerCount } = await supabase
@@ -177,7 +177,7 @@ export async function generateCustomRoomChallenge(roomId) {
 
 // Fetch sample + generate AI challenge for solo session (called during challenge reveal)
 export async function generateSoloChallenge(roomId, difficulty = 'medium') {
-  const genres = ['trap', 'hip-hop', 'edm', 'rap', 'house', 'uk-drill'];
+  const genres = ['trap', 'hip-hop', 'uk-drill', 'rap'];
   const genre = genres[Math.floor(Math.random() * genres.length)];
 
   const { buildChallenge, buildSamplePayload } = await import('./challengeService');
@@ -286,22 +286,51 @@ export async function kickPlayer(roomId, hostId, targetUserId) {
     .eq('id', roomId);
 }
 
-export async function leaveLobby(roomId, userId) {
-  // Check if the leaver is the owner
+export async function closeRoom(roomId, userId) {
   const { data: room } = await supabase
     .from('rooms')
-    .select('owner_id')
+    .select('owner_id, host_id')
+    .eq('id', roomId)
+    .maybeSingle();
+
+  if (!room) throw new Error('ROOM NOT FOUND');
+  if (room.owner_id !== userId && room.host_id !== userId) throw new Error('NOT HOST');
+
+  await supabase.from('rooms').update({ status: 'closed' }).eq('id', roomId);
+
+  const { count } = await supabase
+    .from('room_members')
+    .select('room_id', { count: 'exact' })
+    .eq('room_id', roomId);
+
+  if (count <= 0) {
+    await deleteRoom(roomId);
+  }
+}
+
+export async function deleteRoom(roomId) {
+  await supabase.from('room_messages').delete().eq('room_id', roomId);
+  await supabase.from('room_members').delete().eq('room_id', roomId);
+  await supabase.from('rooms').delete().eq('id', roomId);
+}
+
+export async function leaveLobby(roomId, userId) {
+  const { data: room } = await supabase
+    .from('rooms')
+    .select('owner_id, status')
     .eq('id', roomId)
     .maybeSingle();
 
   const isOwner = room?.owner_id === userId;
 
   if (isOwner) {
-    // Owner leaving — kick all players and close room
     await supabase.from('room_members').delete().eq('room_id', roomId);
-    await supabase.from('rooms').update({ status: 'closed', current_players: 0 }).eq('id', roomId);
+    if (room.status === 'closed') {
+      await deleteRoom(roomId);
+    } else {
+      await supabase.from('rooms').update({ status: 'closed', current_players: 0 }).eq('id', roomId);
+    }
   } else {
-    // Non-owner leaving — just remove self
     await supabase
       .from('room_members')
       .delete()
@@ -314,7 +343,11 @@ export async function leaveLobby(roomId, userId) {
       .eq('room_id', roomId);
 
     if (count <= 0) {
-      await supabase.from('rooms').update({ status: 'closed' }).eq('id', roomId);
+      if (room.status === 'closed') {
+        await deleteRoom(roomId);
+      } else {
+        await supabase.from('rooms').update({ status: 'closed' }).eq('id', roomId);
+      }
     } else {
       await supabase
         .from('rooms')

@@ -32,7 +32,7 @@ import {
   getNameplateEmoji,
 } from '../lib/display';
 import { DEFAULT_ELO, tierFromElo, computeNewElos, getPlayerKFactor } from '../lib/elo';
-import { toggleReady, leaveLobby, startCountdown } from '../lib/roomService';
+import { toggleReady, leaveLobby, startCountdown, deleteRoom as deleteRoomFn } from '../lib/roomService';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
@@ -619,14 +619,22 @@ export default function Battle() {
       }
 
       if (deleteRoom) {
-        await supabase.from('room_members').delete().eq('room_id', room.id);
         await Promise.all([
-          supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id),
           supabase.from('battles').update({ status: 'closed', early_closed: true }).eq('id', battle.id).in('status', ['upcoming', 'active', 'voting']),
         ]);
-        addToast('ROOM CLOSED');
+        await deleteRoomFn(room.id);
+        addToast('ROOM DELETED');
       } else if (!isRanked) {
-        addToast('LEFT ROOM');
+        const { count: remainingMembers } = await supabase
+          .from('room_members')
+          .select('room_id', { count: 'exact' })
+          .eq('room_id', room.id);
+        if (remainingMembers <= 0 && room.status === 'closed') {
+          await deleteRoomFn(room.id);
+          addToast('ROOM DELETED');
+        } else {
+          addToast('LEFT ROOM');
+        }
       }
       if (isRanked) refreshProfile();
       navigate('/', { replace: true });
@@ -1048,6 +1056,30 @@ export default function Battle() {
                   <span>MIN {room.min_rank_tier.toUpperCase()}</span>
                 )}
               </div>
+            )}
+
+            {isOwner && phase === 'closed' && (
+              <button
+                className="rdb-button border-rdb-red text-rdb-red mt-3 w-full"
+                type="button"
+                disabled={leavingRoom}
+                onClick={async () => {
+                  playUiSound('cancel');
+                  if (!confirm('PERMANENTLY DELETE THIS ROOM?')) return;
+                  setLeavingRoom(true);
+                  try {
+                    await deleteRoomFn(room.id);
+                    addToast('ROOM DELETED');
+                    navigate('/', { replace: true });
+                  } catch (err) {
+                    addToast(err.message || 'DELETE FAILED', 'error');
+                  } finally {
+                    setLeavingRoom(false);
+                  }
+                }}
+              >
+                {leavingRoom ? 'DELETING...' : 'DELETE ROOM'}
+              </button>
             )}
 
             {/* ── VOTE BUTTON — visible only in voting phase ── */}

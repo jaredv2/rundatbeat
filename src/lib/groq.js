@@ -28,9 +28,7 @@ const GENRE_RESTRICTION_GUIDE = {
   trap: '808 slides/glides, hi-hat rolls (triplets, 1/32), snare/clap patterns, open hat placement, melody loops, dark/bright FX.',
   hiphop: 'boom-bap swing, kick/snare interplay, sample chops, scratch FX, vinyl crackle, lo-fi texture.',
   'uk-drill': '808 slides, skip hi-hats, dark piano/guitar, percussive FX, triplets, reverse elements.',
-  edm: 'build-ups, drops, filter sweeps, sidechain compression, white noise risers, vocal chops.',
   rap: '808 patterns, hi-hat variation, ad-libs, synth leads, arrangement switch-ups.',
-  house: 'four-on-the-floor kick, hi-hat open/close, claps, synth stabs, filter modulation.',
 };
 
 // ── BPM-based restriction hints ─────────────────────────────────────────
