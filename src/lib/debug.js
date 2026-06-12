@@ -8,7 +8,7 @@ import { useFriendStore } from '../store/friendStore';
 import { enterQueue, leaveLobby, startCountdown, advanceLobbyToActive, generateChallengeAsync } from './lobbyService';
 import { createRoom } from './roomService';
 import { getChallengeSample } from './challengeService';
-import { computeNewElos, tierFromElo, getPlayerKFactor, runEloTests } from './elo';
+import { computeNewElos, tierFromElo, runEloTests } from './elo';
 
 function uid() { return useAuthStore.getState().profile?.id; }
 function label(icon, text) { return `%c${icon} ${text}`; }
@@ -58,7 +58,7 @@ cmds.myElo = () => {
   console.log(label('🏆', 'ELO'), HL);
   console.log(`  Current:  ${p.elo}`);
   console.log(`  Tier:     ${tierFromElo(p.elo)}`);
-  console.log(`  K-factor: ${getPlayerKFactor(p.elo, p.elo)}`);
+  console.log(`  Base ELO: ±3 × tier multiplier`);
   console.log(`  Wins:     ${p.ranked_wins || 0}`);
   console.log(`  Losses:   ${p.ranked_losses || 0}`);
 };

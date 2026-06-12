@@ -16,6 +16,8 @@ const DEFAULT_ROOM_SETUP = {
   votingMinutes: 3,
   maxPlayers: 4,
   soloDifficulty: 'medium',
+  allowInstructions: true,
+  allowRestrictions: true,
 };
 
 export default function MatchmakingModal({ open, onClose, onQueue }) {
@@ -97,6 +99,8 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
         songLengthSeconds: setup.songLengthSeconds,
         votingMinutes: setup.votingMinutes,
         name: roomSetup.name,
+        allowInstructions: roomSetup.allowInstructions,
+        allowRestrictions: roomSetup.allowRestrictions,
       });
       addToast('ROOM CREATED');
       onClose();
@@ -298,14 +302,14 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                 </LabeledField>
                 <div className="grid grid-cols-2 gap-2">
                   <LabeledField icon={<Timer size={13} />} label="Battle Min">
-                    <input className="rdb-input" min="1" type="number" value={roomSetup.battleMinutes} onChange={(event) => updateRoomSetup('battleMinutes', event.target.value)} />
+                    <input className="rdb-input" min="1" type="number" value={roomSetup.battleMinutes} onChange={(event) => updateRoomSetup('battleMinutes', Number(event.target.value))} />
                   </LabeledField>
                   <LabeledField icon={<Music size={13} />} label="Song Length Sec">
-                    <input className="rdb-input" min="15" type="number" value={roomSetup.songLengthSeconds} onChange={(event) => updateRoomSetup('songLengthSeconds', event.target.value)} />
+                    <input className="rdb-input" min="15" type="number" value={roomSetup.songLengthSeconds} onChange={(event) => updateRoomSetup('songLengthSeconds', Number(event.target.value))} />
                   </LabeledField>
                 </div>
                 <LabeledField icon={<Timer size={13} />} label="Voting Min">
-                  <input className="rdb-input" min="1" max="60" type="number" value={roomSetup.votingMinutes} onChange={(event) => updateRoomSetup('votingMinutes', event.target.value)} />
+                  <input className="rdb-input" min="1" max="60" type="number" value={roomSetup.votingMinutes} onChange={(event) => updateRoomSetup('votingMinutes', Number(event.target.value))} />
                 </LabeledField>
                 <div className="border border-rdb-border bg-rdb-bg/60 p-2">
                   <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-muted"><Users size={13} />Max Players: {roomSetup.maxPlayers}</span>
@@ -320,6 +324,26 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                   <div className="flex justify-between font-mono text-[9px] uppercase text-rdb-muted">
                     <span>2</span><span>10</span>
                   </div>
+                </div>
+                <div className="flex gap-4 mt-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={roomSetup.allowInstructions}
+                      onChange={(e) => updateRoomSetup('allowInstructions', e.target.checked)}
+                      className="accent-rdb-orange"
+                    />
+                    <span className="font-mono text-[10px] uppercase text-rdb-muted">Allow Instructions</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={roomSetup.allowRestrictions}
+                      onChange={(e) => updateRoomSetup('allowRestrictions', e.target.checked)}
+                      className="accent-rdb-orange"
+                    />
+                    <span className="font-mono text-[10px] uppercase text-rdb-muted">Allow Restrictions</span>
+                  </label>
                 </div>
               </div>
               <button className="apple-primary-action mt-3 w-full" disabled={status === 'busy'} type="button" onClick={createRoomBattle}>

@@ -10,16 +10,10 @@ const TIER_THRESHOLDS = [
   { elo: 900,  tier: 'silver' },
 ];
 
-const TIER_K_FACTOR = {
-  bronze: 32,
-  silver: 32,
-  gold: 32,
-  platinum: 32,
-  diamond: 32,
-  elite: 32,
-  champion: 32,
-  goat: 32,
-};
+const TIER_ORDER = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'elite', 'champion', 'goat'];
+
+const BASE_ELO_CHANGE = 3;
+const TIER_MULTIPLIER = 1.5;
 
 export function tierFromElo(elo) {
   for (const t of TIER_THRESHOLDS) {
@@ -29,20 +23,14 @@ export function tierFromElo(elo) {
 }
 
 export function tierOrder(tier) {
-  const tiers = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'elite', 'champion', 'goat'];
-  return tiers.indexOf(tier?.toLowerCase());
+  return TIER_ORDER.indexOf(tier?.toLowerCase());
 }
 
-export function expectedScore(ratingA, ratingB) {
-  return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
-}
-
-export function newElo(rating, expected, actual, K) {
-  return Math.round(rating + K * (actual - expected));
-}
-
-export function getPlayerKFactor(playerElo, lobbyAvgElo) {
-  return 32;
+function tierDiffMultiplier(tierA, tierB) {
+  const a = TIER_ORDER.indexOf(tierA);
+  const b = TIER_ORDER.indexOf(tierB);
+  if (a < 0 || b < 0) return 1;
+  return Math.pow(TIER_MULTIPLIER, Math.abs(a - b));
 }
 
 export function computeLobbyAverageElo(players) {
@@ -50,39 +38,37 @@ export function computeLobbyAverageElo(players) {
   return players.reduce((sum, p) => sum + (p.elo ?? DEFAULT_ELO), 0) / players.length;
 }
 
-function positionScore(position, totalPlayers) {
-  if (totalPlayers <= 2) {
-    return position === 0 ? 1.0 : 0.0;
-  }
-  if (position === 0) return 1.0;
-  if (position === 1) return 0.4;
-  if (position === 2) return 0.15;
-  return 0.0;
-}
-
 export function computeNewElos(players, ranking) {
   const sorted = [...players].sort((a, b) => (ranking[a.user_id] ?? 99) - (ranking[b.user_id] ?? 99));
   const n = sorted.length;
   if (n === 0) return [];
-  const lobbyAvgElo = computeLobbyAverageElo(players);
 
-  return sorted.map((p, i) => {
-    const actual = n > 1 ? positionScore(i, n) : 0.5;
+  const results = sorted.map((p, i) => {
+    const myTier = p.rank_tier || tierFromElo(p.elo ?? DEFAULT_ELO);
     const opponents = sorted.filter((o) => o.user_id !== p.user_id);
-    const expected = opponents.length > 0
-      ? opponents.reduce((sum, o) => sum + expectedScore(p.elo ?? DEFAULT_ELO, o.elo ?? DEFAULT_ELO), 0) / opponents.length
-      : 0.5;
-    const K = getPlayerKFactor(p.elo ?? DEFAULT_ELO, lobbyAvgElo);
-    const elo = Math.max(0, newElo(p.elo ?? DEFAULT_ELO, expected, actual, K));
+    const didWin = i === 0;
+
+    let totalDelta = 0;
+    for (const o of opponents) {
+      const oppTier = o.rank_tier || tierFromElo(o.elo ?? DEFAULT_ELO);
+      const mult = tierDiffMultiplier(myTier, oppTier);
+      totalDelta += didWin ? (BASE_ELO_CHANGE * mult) : -(BASE_ELO_CHANGE * mult);
+    }
+
+    const avgDelta = opponents.length > 0 ? totalDelta / opponents.length : (didWin ? BASE_ELO_CHANGE : -BASE_ELO_CHANGE);
+    const elo = Math.max(0, Math.round((p.elo ?? DEFAULT_ELO) + avgDelta));
+
     return {
       user_id: p.user_id,
       newElo: elo,
       oldElo: p.elo ?? DEFAULT_ELO,
-      kFactor: K,
-      expected: +expected.toFixed(3),
-      actual: +actual.toFixed(3),
+      delta: Math.round(avgDelta),
     };
   });
+
+  console.log('[ELO] computeNewElos:', results.map(r => `${r.user_id}: ${r.oldElo}→${r.newElo} (${r.delta >= 0 ? '+' : ''}${r.delta})`).join(' | '));
+
+  return results;
 }
 
 // ── Debug helpers (callable from browser console) ─────────
@@ -90,7 +76,7 @@ export function computeNewElos(players, ranking) {
 export function runEloTests() {
   const scenarios = [
     {
-      name: 'Bronze beats Diamond (1v1)',
+      name: 'Bronze beats Diamond (1v1) — big upset',
       players: [
         { user_id: 'bronze', elo: 800, rank_tier: 'bronze' },
         { user_id: 'diamond', elo: 1400, rank_tier: 'diamond' },
@@ -98,7 +84,7 @@ export function runEloTests() {
       ranking: { bronze: 1, diamond: 2 },
     },
     {
-      name: 'Diamond beats Bronze (1v1)',
+      name: 'Diamond beats Bronze (1v1) — expected',
       players: [
         { user_id: 'diamond', elo: 1400, rank_tier: 'diamond' },
         { user_id: 'bronze', elo: 800, rank_tier: 'bronze' },
@@ -161,6 +147,14 @@ export function runEloTests() {
       ],
       ranking: { gold_a: 1, gold_b: 2, bronze_a: 3, bronze_b: 4 },
     },
+    {
+      name: '1v1 forfeit — same tier (should be ±3)',
+      players: [
+        { user_id: 'a', elo: 1000, rank_tier: 'silver' },
+        { user_id: 'b', elo: 1000, rank_tier: 'silver' },
+      ],
+      ranking: { a: 1, b: 2 },
+    },
   ];
 
   for (const s of scenarios) {
@@ -168,13 +162,12 @@ export function runEloTests() {
     console.log(`%c=== ${s.name} ===`, 'font-weight:bold');
     for (const r of result) {
       const player = s.players.find((p) => p.user_id === r.user_id);
-      const delta = r.newElo - r.oldElo;
-      const sign = delta >= 0 ? '+' : '';
+      const sign = r.delta >= 0 ? '+' : '';
       const oldTier = tierFromElo(r.oldElo);
       const newTier = tierFromElo(r.newElo);
       const rankChange = oldTier !== newTier ? ` (${oldTier} → ${newTier})` : '';
       console.log(
-        `  ${r.user_id} (${player.rank_tier}, ${r.oldElo}elo): ${r.oldElo} → ${r.newElo} (${sign}${delta})${rankChange}  K=${r.kFactor}  expected=${r.expected}  actual=${r.actual}`,
+        `  ${r.user_id} (${player.rank_tier}, ${r.oldElo}elo): ${r.oldElo} → ${r.newElo} (${sign}${r.delta})${rankChange}`,
       );
     }
   }

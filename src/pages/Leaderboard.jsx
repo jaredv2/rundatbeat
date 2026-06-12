@@ -8,13 +8,13 @@ import { playUiSound } from '../lib/sfx';
 
 const PAGE_SIZE = 20;
 
-const TIER_ORDER = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'master'];
+const TIER_ORDER = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'elite', 'champion', 'goat'];
 
 const SORT_COLUMNS = {
   'Wins':       { allTime: 'wins',           period: k => k === 'wins' ? 'period_wins' : k },
   'Battles':    { allTime: 'battles_entered', period: k => k === 'battles_entered' ? 'period_battles' : k },
   'Win Rate':   { allTime: 'win_rate',        period: k => '_win_rate' },
-  'RDB':        { allTime: 'total_tokens_earned', period: k => '_tokens' },
+  'ELO':        { allTime: 'elo',             period: k => '_elo' },
   'Tier':       { allTime: 'rank_tier',       period: k => '_tier' },
 };
 
@@ -56,9 +56,9 @@ export default function Leaderboard() {
         if (pk === '_win_rate') {
           va = a.period_battles ? a.period_wins / a.period_battles : 0;
           vb = b.period_battles ? b.period_wins / b.period_battles : 0;
-        } else if (pk === '_tokens') {
-          va = Number(a.total_tokens_earned || 0);
-          vb = Number(b.total_tokens_earned || 0);
+        } else if (pk === '_elo') {
+          va = Number(a.elo || 0);
+          vb = Number(b.elo || 0);
         } else if (pk === '_tier') {
           va = TIER_ORDER.indexOf(a.rank_tier) ?? -1;
           vb = TIER_ORDER.indexOf(b.rank_tier) ?? -1;
@@ -111,7 +111,7 @@ export default function Leaderboard() {
           </colgroup>
           <thead>
             <tr>
-              {['Rank', 'Username', 'Wins', 'Battles', 'Win Rate', 'RDB', 'Tier'].map((h) => {
+              {['Rank', 'Username', 'Wins', 'Battles', 'Win Rate', 'ELO', 'Tier'].map((h) => {
                 const isSortable = SORT_COLUMNS[h];
                 const active = sort.key === h;
                 return (
@@ -154,7 +154,7 @@ export default function Leaderboard() {
                   <td className="py-3.5 font-mono text-sm">{formatNumber(user.wins)}</td>
                   <td className="py-3.5 font-mono text-sm">{formatNumber(user.battles_entered)}</td>
                   <td className="py-3.5 font-mono text-sm">{winRate}%</td>
-                  <td className="py-3.5 font-mono text-sm">{formatNumber(user.tokens)}</td>
+                  <td className="py-3.5 font-mono text-sm">{formatNumber(user.elo)}</td>
                   <td className="py-3.5"><RankBadge tier={user.rank_tier} /></td>
                 </tr>
               );

@@ -23,7 +23,7 @@ function useCountdownFrom(endsAt) {
   return remaining;
 }
 
-export default function ChallengeReveal({ challenge, endsAt, countdownDuration = 15, hideChallenge, battleId, roomId, roomMode, difficulty }) {
+export default function ChallengeReveal({ challenge, endsAt, countdownDuration = 10, hideChallenge, battleId, roomId, roomMode, difficulty }) {
   // Compute our own deadline on mount — ignore parent endsAt if it's in the past or too short
   const effectiveEndsAt = useMemo(() => {
     const now = Date.now();
@@ -203,7 +203,7 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
           {/* Full challenge preview when revealed */}
           {!hideChallenge && revealed && challenge?.instructions && (
             <div className="space-y-3 pt-2 text-left">
-              {challenge.instructions && (
+              {challenge.allowInstructions !== false && challenge.instructions && (
                 <div>
                   <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>
                   <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-3">
@@ -211,7 +211,7 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
                   </p>
                 </div>
               )}
-              {challenge.restrictionsList && (
+              {challenge.allowRestrictions !== false && challenge.restrictionsList && (
                 <div>
                   <p className="font-mono text-[10px] uppercase text-rdb-red mb-1">RESTRICTIONS</p>
                   <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-3">

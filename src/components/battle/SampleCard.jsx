@@ -3,11 +3,13 @@ import WaveformPlayer from '../audio/WaveformPlayer';
 import { getDownloadUrl } from '../../lib/challengeService';
 import { useAuthStore } from '../../store/authStore';
 
-export default function SampleCard({ challenge, phase }) {
+export default function SampleCard({ challenge, phase, room }) {
   const { profile } = useAuthStore();
   if (!challenge) return null;
 
   const isVoting = phase === 'voting';
+  const allowInstructions = room?.challenge?.allowInstructions !== false;
+  const allowRestrictions = room?.challenge?.allowRestrictions !== false;
 
   return (
     <div className="rdb-panel p-5">
@@ -90,7 +92,7 @@ export default function SampleCard({ challenge, phase }) {
         </a>
       </p>
 
-      {challenge.instructions && (
+      {allowInstructions && challenge.instructions && (
         <div className="mt-4">
           <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>
           <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-4">
@@ -99,7 +101,7 @@ export default function SampleCard({ challenge, phase }) {
         </div>
       )}
 
-      {challenge.restrictionsList && (
+      {allowRestrictions && challenge.restrictionsList && (
         <div className="mt-4">
           <p className="font-mono text-[10px] uppercase text-rdb-red mb-1">RESTRICTIONS</p>
           <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-4">
@@ -108,7 +110,7 @@ export default function SampleCard({ challenge, phase }) {
         </div>
       )}
 
-      {challenge.restriction && !challenge.restrictionsList && (
+      {allowRestrictions && challenge.restriction && !challenge.restrictionsList && (
         <div className="mt-4 rounded-lg border border-rdb-orange/40 bg-rdb-orange/10 p-4">
           <p className="font-mono text-[10px] uppercase text-rdb-orange">RESTRICTION</p>
           <p className="mt-1 font-mono text-sm uppercase text-rdb-text">{challenge.restriction}</p>

@@ -8,8 +8,8 @@ import { useAuthStore } from '../store/authStore';
 import { playUiSound } from '../lib/sfx';
 
 const ACTIVE_ROOM_STATUSES = ['open', 'locked'];
-const TIER_ORDER = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'master'];
-const TIER_COLORS = { bronze: '#CD7F32', silver: '#C0C0C0', gold: '#FFD700', platinum: '#E5E4E2', diamond: '#B9F2FF', master: '#FF6B6B' };
+const TIER_ORDER = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'elite', 'champion', 'goat'];
+const TIER_COLORS = { bronze: '#CD7F32', silver: '#C0C0C0', gold: '#FFD700', platinum: '#E5E4E2', diamond: '#B9F2FF', elite: '#c084fc', champion: '#f472b6', goat: '#ff8c00' };
 
 const dayLabel = (offset) => {
   const d = new Date();

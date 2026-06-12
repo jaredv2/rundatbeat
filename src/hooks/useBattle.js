@@ -122,7 +122,7 @@ export function useBattle(id) {
           supabase.from('submissions')
             .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
             .eq('battle_id', actualBattleId)
-            .order('vote_count', { ascending: false }),
+            .order('rating_total', { ascending: false }),
         ]);
         setBattle(prev => mergeObj(prev, battleData ?? null));
         setSubmissions(prev => reconcileArray(prev, submissionData ?? []));
@@ -137,8 +137,8 @@ export function useBattle(id) {
         await refreshRoomData(loadedRoom.id);
       }
 
-      // Auto-join custom room if user is not yet a member
-      if (loadedRoom?.id && loadedRoom.status !== 'closed' && loadedRoom.mode !== 'ranked') {
+      // Auto-join custom room if user is not yet a member (lobby only — locked rooms are in-progress)
+      if (loadedRoom?.id && loadedRoom.status === 'lobby' && loadedRoom.mode !== 'ranked') {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data: existingMember } = await supabase
@@ -153,12 +153,13 @@ export function useBattle(id) {
                 const { joinRoom } = await import('../lib/roomService');
                 await joinRoom(loadedRoom.id, user.id);
               } else {
-                await supabase.from('room_members').insert({
+                const { error: memberErr } = await supabase.from('room_members').insert({
                   room_id: loadedRoom.id,
                   user_id: user.id,
                   role: 'member',
                   is_ready: false,
                 });
+                if (memberErr && memberErr.code !== '23505') throw memberErr;
               }
               await refreshRoomData(loadedRoom.id);
             } catch { /* room may be full or closed — ignore */ }
@@ -219,7 +220,7 @@ export function useBattle(id) {
       .from('submissions')
       .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
       .eq('battle_id', bid)
-      .order('vote_count', { ascending: false });
+      .order('rating_total', { ascending: false });
     if (data) setSubmissions(prev => reconcileArray(prev, data));
   }
 
@@ -292,6 +293,10 @@ export function useBattle(id) {
         channel = channel
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'battles', filter: `id=eq.${bid}` }, (payload) => {
             setBattle(prev => mergeObj(prev, payload.new));
+          })
+          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'battles', filter: `id=eq.${bid}` }, () => {
+            setBattle(null);
+            setSubmissions([]);
           })
           .on('postgres_changes', { event: '*', schema: 'public', table: 'votes', filter: `battle_id=eq.${bid}` }, () => { refreshSubmissions(); })
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'submissions', filter: `battle_id=eq.${bid}` }, (payload) => {

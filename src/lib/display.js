@@ -80,7 +80,7 @@ export const RANK_STYLES = {
   diamond: { color: '#60a5fa', bg: 'rgba(59, 130, 246, 0.16)' },
   elite: { color: '#c084fc', bg: 'rgba(168, 85, 247, 0.16)' },
   champion: { color: '#f472b6', bg: 'rgba(236, 72, 153, 0.16)' },
-  unreal: { color: '#ff8c00', bg: 'rgba(255, 140, 0, 0.18)' },
+  goat: { color: '#ff8c00', bg: 'rgba(255, 140, 0, 0.18)' },
 };
 
 export function getThemeStyle(profile) {

@@ -1,12 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { computeNewElos, DEFAULT_ELO, getPlayerKFactor, tierFromElo } from '../lib/elo';
+import { computeNewElos, DEFAULT_ELO, tierFromElo } from '../lib/elo';
 import { advanceLobbyToActive } from '../lib/roomService';
 import { pushNotificationToMany } from '../lib/pushNotification';
 
 const DEFAULT_VOTING_MINUTES = 3;
-const LOBBY_COUNTDOWN_MS = 5000;
+const LOBBY_COUNTDOWN_MS = 10000;
 const TICK_INTERVAL_MS = 3000;
+const _closingGuards = new Map();
+
+export function isBattleClosing(battleId) {
+  return Boolean(_closingGuards.get(battleId));
+}
+
+export function markBattleLeaving(battleId) {
+  _closingGuards.set(battleId, 'leaving');
+}
+
+export function clearBattleLeaving(battleId) {
+  if (_closingGuards.get(battleId) === 'leaving') {
+    _closingGuards.delete(battleId);
+  }
+}
 
 export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
   const [phase, setPhase]           = useState(() => derivePhase(battle, room));
@@ -56,8 +71,9 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
       const canDriveNow = isOwner || (r?.mode === 'ranked' && !r?.owner_id);
       if (!canDriveNow) return;
 
-      // Auto-close ranked battle when only 1 player remains
-      if (!closingRef.current && !isSolo && r?.mode === 'ranked' && b?.id && ['active', 'voting', 'upcoming'].includes(currentPhase)) {
+      // Auto-close ranked battle when only 1 player remains (not during voting — let it finish)
+      if (!closingRef.current && !isSolo && r?.mode === 'ranked' && b?.id && ['active', 'upcoming'].includes(currentPhase)) {
+        if (_closingGuards.get(b.id) === 'leaving') return;
         const { count } = await supabase.from('room_members').select('room_id', { count: 'exact' }).eq('room_id', r.id);
         if (count <= 1) {
           closingRef.current = true;
@@ -110,7 +126,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
           closingRef.current = true;
           setCalculatingWinner(true);
           try {
-            await advanceToClosed(b.id, r.id);
+            await advanceToClosed(b.id, r.id, { closeRoom: allStopped });
           } finally {
             setCalculatingWinner(false);
             closingRef.current = false;
@@ -192,10 +208,11 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
           winner_id: top?.user_id || null,
           early_closed: true,
         }).eq('id', battle.id),
-        supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id),
+        supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id)
+          .in('status', ['locked', 'voting']),
       ]);
     } else {
-      await advanceToClosed(battle.id, room.id);
+      await advanceToClosed(battle.id, room.id, { closeRoom: true });
     }
   }, [isOwner, battle, room]);
 
@@ -207,6 +224,9 @@ function derivePhase(battle, room) {
   if (room?.status === 'matchmaking') return 'matchmaking';
   if (!battle) {
     if (room?.status === 'lobby') return 'lobby';
+    // Battle deleted by cleanup (room has no battle_id) — stay closed
+    if ((room?.status === 'locked' || room?.status === 'voting' || room?.status === 'closed') && !room?.battle_id) return 'closed';
+    // Battle exists but hasn't loaded yet — treat as upcoming
     return 'upcoming';
   }
   const status = battle.status;
@@ -269,69 +289,125 @@ async function advanceToVoting(battleId, roomId, votingMinutes = DEFAULT_VOTING_
   if (roomRes.error) throw new Error(`advanceToVoting rooms: ${roomRes.error.message}`);
 }
 
-async function advanceToClosed(battleId, roomId) {
-  const { data: memberCount } = await supabase
+async function advanceToClosed(battleId, roomId, { closeRoom = false } = {}) {
+  if (_closingGuards.get(battleId)) return;
+  _closingGuards.set(battleId, true);
+
+  try {
+  const { count: memberCount } = await supabase
     .from('room_members')
     .select('room_id', { count: 'exact' })
     .eq('room_id', roomId);
 
   const isAutoClose = (memberCount ?? 0) <= 1;
 
-  // Close battle + room
-  const [battleRes, roomRes] = await Promise.all([
-    supabase
-      .from('battles')
-      .update({ status: 'closed', ...(isAutoClose ? { early_closed: true } : {}) })
-      .eq('id', battleId)
-      .in('status', ['upcoming', 'active', 'voting'])
-      .select('id'),
-    supabase
-      .from('rooms')
-      .update({ status: 'closed' })
-      .eq('id', roomId)
-      .in('status', ['locked', 'voting']),
-  ]);
-  if (battleRes.error) throw new Error(`advanceToClosed battles: ${battleRes.error.message}`);
-  if (roomRes.error) throw new Error(`advanceToClosed rooms: ${roomRes.error.message}`);
+  const { data: battle } = await supabase
+    .from('battles')
+    .select('mode, early_closed, winner_id')
+    .eq('id', battleId)
+    .maybeSingle();
 
-  if (!battleRes.error && battleRes.data?.length) {
+  // ── Compute ELO and record wins/losses BEFORE closing ──
+  if (battle?.mode === 'ranked' && !battle.winner_id) {
     try {
-      const { data: battle } = await supabase
-        .from('battles')
-        .select('mode, early_closed, winner_id')
-        .eq('id', battleId)
-        .maybeSingle();
+      const { data: remaining } = await supabase
+        .from('room_members')
+        .select('user_id')
+        .eq('room_id', roomId);
 
-      if (battle?.mode === 'ranked' && !battle.winner_id) {
-        // Check if only 1 player remains → forfeit win
-        const { data: remaining } = await supabase
-          .from('room_members')
+      if (remaining?.length === 1) {
+        // ── FORFEIT: 1 player remains → they win by default ──
+        const winnerId = remaining[0].user_id;
+        const { data: subs } = await supabase
+          .from('submissions')
           .select('user_id')
-          .eq('room_id', roomId);
+          .eq('battle_id', battleId);
 
-        if (remaining?.length === 1) {
-          // ── FORFEIT: 1 player remains → they win by default ──
-          const winnerId = remaining[0].user_id;
-          const { data: allMembers } = await supabase
-            .from('room_members')
+        // Also include players from the ranked lobby (catches leavers with 0 submissions)
+        const { data: lobby } = await supabase
+          .from('ranked_lobbies')
+          .select('id')
+          .eq('battle_id', battleId)
+          .maybeSingle();
+        let lobbyUserIds = [];
+        if (lobby) {
+          const { data: lobbyMembers } = await supabase
+            .from('ranked_lobby_members')
             .select('user_id')
-            .eq('room_id', roomId)
-            .order('joined_at');
+            .eq('lobby_id', lobby.id);
+          lobbyUserIds = (lobbyMembers || []).map(m => m.user_id);
+        }
 
-          // Get all original participants from submissions + remaining
-          const { data: subs } = await supabase
-            .from('submissions')
-            .select('user_id')
-            .eq('battle_id', battleId);
-          const allUserIds = [...new Set([
-            winnerId,
-            ...(subs || []).map(s => s.user_id),
-          ])];
+        const allUserIds = [...new Set([
+          winnerId,
+          ...(subs || []).map(s => s.user_id),
+          ...lobbyUserIds,
+        ])];
 
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, elo, rank_tier, wins, battles_entered, ranked_wins, ranked_losses')
+          .in('id', allUserIds);
+
+        const players = (profiles || []).map(p => ({
+          user_id: p.id,
+          elo: p.elo ?? DEFAULT_ELO,
+          rank_tier: p.rank_tier,
+        }));
+
+        const ranking = {};
+        allUserIds.forEach(id => { ranking[id] = id === winnerId ? 1 : 2; });
+
+        const eloUpdates = computeNewElos(players, ranking);
+
+        console.log('[RoomFSM] FORFEIT ELO:', { battleId, winnerId, eloUpdates });
+
+        await supabase.from('battles').update({ winner_id: winnerId, early_closed: true })
+          .eq('id', battleId).is('winner_id', null);
+
+        await Promise.all(eloUpdates.map(u => {
+          const prof = (profiles || []).find(p => p.id === u.user_id);
+          const isWinner = u.user_id === winnerId;
+          return supabase.from('profiles').update({
+            elo: u.newElo,
+            rank_tier: tierFromElo(u.newElo),
+            wins: (prof?.wins || 0) + (isWinner ? 1 : 0),
+            battles_entered: (prof?.battles_entered || 0) + 1,
+            ranked_wins: (prof?.ranked_wins || 0) + (isWinner ? 1 : 0),
+            ranked_losses: (prof?.ranked_losses || 0) + (!isWinner ? 1 : 0),
+          }).eq('id', u.user_id);
+        }));
+
+        pushNotificationToMany(allUserIds.filter(id => id !== winnerId), {
+          type: 'battle_lost', title: 'BATTLE LOST', body: 'Your opponent won by forfeit.',
+          link: `/battle/${battleId}`,
+        });
+        pushNotificationToMany([winnerId], {
+          type: 'battle_won', title: 'BATTLE WON', body: 'Your opponent left — you win!',
+          link: `/battle/${battleId}`,
+        });
+
+      } else if (!battle.early_closed || remaining?.length >= 2) {
+        // ── NORMAL CLOSE: vote-based ELO ──
+        const { data: subs } = await supabase
+          .from('submissions')
+          .select('user_id, rating_total')
+          .eq('battle_id', battleId)
+          .order('rating_total', { ascending: false });
+
+        if (subs?.length) {
+          const ranking = {};
+          subs.forEach((s, i) => { ranking[s.user_id] = i + 1; });
+          const winnerId = subs[0].user_id;
+
+          await supabase.from('battles').update({ winner_id: winnerId })
+            .eq('id', battleId).is('winner_id', null);
+
+          const userIds = subs.map(s => s.user_id);
           const { data: profiles } = await supabase
             .from('profiles')
             .select('id, elo, rank_tier, wins, battles_entered, ranked_wins, ranked_losses')
-            .in('id', allUserIds);
+            .in('id', userIds);
 
           const players = (profiles || []).map(p => ({
             user_id: p.id,
@@ -339,112 +415,68 @@ async function advanceToClosed(battleId, roomId) {
             rank_tier: p.rank_tier,
           }));
 
-          // Winner is rank 1, everyone else rank 2
-          const ranking = {};
-          allUserIds.forEach(id => { ranking[id] = id === winnerId ? 1 : 2; });
+          let eloUpdates;
+          if (players.length <= 1) {
+            eloUpdates = players.map(p => ({
+              user_id: p.user_id,
+              newElo: (p.elo ?? DEFAULT_ELO) + 3,
+              oldElo: p.elo ?? DEFAULT_ELO,
+              delta: 3,
+            }));
+          } else {
+            eloUpdates = computeNewElos(players, ranking);
+          }
 
-          const eloUpdates = computeNewElos(players, ranking);
-
-          await supabase.from('battles').update({ winner_id: winnerId, early_closed: true })
-            .eq('id', battleId).is('winner_id', null);
+          console.log('[RoomFSM] NORMAL CLOSE ELO:', { battleId, winnerId, eloUpdates });
 
           await Promise.all(eloUpdates.map(u => {
             const prof = (profiles || []).find(p => p.id === u.user_id);
-            const isWinner = u.user_id === winnerId;
+            const isFirst = ranking[u.user_id] === 1;
             return supabase.from('profiles').update({
               elo: u.newElo,
               rank_tier: tierFromElo(u.newElo),
-              wins: (prof?.wins || 0) + (isWinner ? 1 : 0),
+              wins: (prof?.wins || 0) + (isFirst ? 1 : 0),
               battles_entered: (prof?.battles_entered || 0) + 1,
-              ranked_wins: (prof?.ranked_wins || 0) + (isWinner ? 1 : 0),
-              ranked_losses: (prof?.ranked_losses || 0) + (!isWinner ? 1 : 0),
+              ranked_wins: (prof?.ranked_wins || 0) + (isFirst ? 1 : 0),
+              ranked_losses: (prof?.ranked_losses || 0) + (!isFirst ? 1 : 0),
             }).eq('id', u.user_id);
           }));
 
-          // Notify players
-          pushNotificationToMany(allUserIds.filter(id => id !== winnerId), {
-            type: 'battle_lost', title: 'BATTLE LOST', body: 'Your opponent won by forfeit.',
+          const losers = userIds.filter(id => id !== winnerId);
+          pushNotificationToMany(losers, {
+            type: 'battle_lost', title: 'BATTLE LOST', body: `You lost to ${profiles?.find(p => p.id === winnerId)?.username || 'someone'}.`,
             link: `/battle/${battleId}`,
           });
           pushNotificationToMany([winnerId], {
-            type: 'battle_won', title: 'BATTLE WON', body: 'Your opponent left — you win!',
+            type: 'battle_won', title: 'BATTLE WON', body: 'Congratulations — you won!',
             link: `/battle/${battleId}`,
           });
-
-        } else if (!battle.early_closed || remaining?.length >= 2) {
-          // ── NORMAL CLOSE: vote-based ELO (no one left early) ──
-          const { data: subs } = await supabase
-            .from('submissions')
-            .select('user_id, rating_total')
-            .eq('battle_id', battleId)
-            .order('rating_total', { ascending: false });
-
-          if (subs?.length) {
-            const ranking = {};
-            subs.forEach((s, i) => { ranking[s.user_id] = i + 1; });
-            const winnerId = subs[0].user_id;
-            await supabase.from('battles').update({ winner_id: winnerId })
-              .eq('id', battleId).is('winner_id', null);
-
-            const userIds = subs.map(s => s.user_id);
-            const { data: profiles } = await supabase
-              .from('profiles')
-              .select('id, elo, rank_tier, wins, battles_entered, ranked_wins, ranked_losses')
-              .in('id', userIds);
-
-            const players = (profiles || []).map(p => ({
-              user_id: p.id,
-              elo: p.elo ?? DEFAULT_ELO,
-              rank_tier: p.rank_tier,
-            }));
-
-            let eloUpdates;
-            if (players.length <= 1) {
-              eloUpdates = players.map(p => {
-                const K = getPlayerKFactor(p.elo ?? DEFAULT_ELO, p.elo ?? DEFAULT_ELO);
-                const gain = Math.round(K * 0.5);
-                return {
-                  user_id: p.user_id,
-                  newElo: (p.elo ?? DEFAULT_ELO) + gain,
-                  oldElo: p.elo ?? DEFAULT_ELO,
-                  kFactor: K,
-                  expected: 0.5,
-                  actual: 1.0,
-                };
-              });
-            } else {
-              eloUpdates = computeNewElos(players, ranking);
-            }
-
-            await Promise.all(eloUpdates.map(u => {
-              const prof = (profiles || []).find(p => p.id === u.user_id);
-              const isFirst = ranking[u.user_id] === 1;
-              return supabase.from('profiles').update({
-                elo: u.newElo,
-                rank_tier: tierFromElo(u.newElo),
-                wins: (prof?.wins || 0) + (isFirst ? 1 : 0),
-                battles_entered: (prof?.battles_entered || 0) + 1,
-                ranked_wins: (prof?.ranked_wins || 0) + (isFirst ? 1 : 0),
-                ranked_losses: (prof?.ranked_losses || 0) + (!isFirst ? 1 : 0),
-              }).eq('id', u.user_id);
-            }));
-
-            // Notify players
-            const losers = userIds.filter(id => id !== winnerId);
-            pushNotificationToMany(losers, {
-              type: 'battle_lost', title: 'BATTLE LOST', body: `You lost to ${profiles?.find(p => p.id === winnerId)?.username || 'someone'}.`,
-              link: `/battle/${battleId}`,
-            });
-            pushNotificationToMany([winnerId], {
-              type: 'battle_won', title: 'BATTLE WON', body: 'Congratulations — you won!',
-              link: `/battle/${battleId}`,
-            });
-          }
         }
       }
     } catch (err) {
       console.error('[RoomFSM] ranked ELO update error:', err);
     }
+  }
+
+  // ── Close battle AFTER ELO is written ──
+  const battleRes = await supabase
+    .from('battles')
+    .update({ status: 'closed', ...(isAutoClose ? { early_closed: true } : {}) })
+    .eq('id', battleId)
+    .in('status', ['upcoming', 'active', 'voting']);
+  if (battleRes.error) throw new Error(`advanceToClosed battles: ${battleRes.error.message}`);
+
+  // ── Close room only when all players locked voting ──
+  if (closeRoom) {
+    await supabase
+      .from('rooms')
+      .update({ status: 'closed' })
+      .eq('id', roomId)
+      .in('status', ['locked', 'voting']);
+  }
+
+  } finally {
+    _closingGuards.delete(battleId);
   }
 }
 

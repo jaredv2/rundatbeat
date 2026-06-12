@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Trophy, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { playUiSound } from '../../lib/sfx';
-import { tierFromElo } from '../../lib/elo';
 
 export default function WinModal({ open, eloChange, oldTier, newTier, onPlayAgain, onClose }) {
   const navigate = useNavigate();
@@ -35,8 +34,8 @@ export default function WinModal({ open, eloChange, oldTier, newTier, onPlayAgai
 
   if (!open) return null;
 
-  const displayOld = oldTier || (eloChange !== null && tierFromElo(0));
-  const displayNew = newTier || (eloChange !== null && tierFromElo(eloChange > 0 ? eloChange : 0));
+  const displayOld = oldTier || 'bronze';
+  const displayNew = newTier || oldTier || 'bronze';
   const rankedUp = displayOld && displayNew && displayOld !== displayNew && eloChange > 0;
   const rankedDown = displayOld && displayNew && displayOld !== displayNew && eloChange < 0;
 

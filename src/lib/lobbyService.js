@@ -176,15 +176,18 @@ export async function startCountdown(lobbyId) {
     }).select('*').single();
     if (roomErr) throw roomErr;
 
-    // Insert current user as room owner
-    const currentUser = useAuthStore.getState().profile?.id;
-    if (currentUser) {
-      await supabase.from('room_members').insert({
+    // Insert ALL lobby members into room_members (ignore duplicates)
+    if (members?.length) {
+      const currentUser = useAuthStore.getState().profile?.id;
+      const memberRows = members.map((m) => ({
         room_id: room.id,
-        user_id: currentUser,
-        role: 'owner',
+        user_id: m.user_id,
+        role: m.user_id === currentUser ? 'owner' : 'member',
         is_ready: false,
-      });
+      }));
+      const { error: batchErr } = await supabase.from('room_members').insert(memberRows);
+      // Ignore duplicate key errors (race with advanceLobbyToActive)
+      if (batchErr && batchErr.code !== '23505') throw batchErr;
     }
 
     // NOW set countdown_started_at — battle + room are guaranteed to exist
@@ -284,7 +287,7 @@ export async function advanceLobbyToActive(lobbyId) {
     .eq('id', lobbyId)
     .maybeSingle();
 
-  if (!lobby || lobby.status === 'closed') throw new Error('LOBBY ALREADY CLOSED');
+  if (!lobby || lobby.status === 'closed') return { battleId: lobby?.battle_id || null };
 
   let battleId = lobby.battle_id;
   for (let i = 0; i < 60 && !battleId; i++) {

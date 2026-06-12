@@ -1,51 +1,12 @@
 import { supabase } from '../lib/supabase';
 
-const TIER_MULTIPLIERS = {
-  bronze:   1.0,
-  silver:   1.1,
-  gold:     1.2,
-  platinum: 1.35,
-  diamond:  1.5,
-  elite:    1.7,
-  champion: 1.9,
-  goat:     2.0,
-};
-
-function accountAgeMultiplier(voterProfile) {
-  const createdAt = voterProfile?.created_at;
-  if (!createdAt) return 1.0;
-  const ageDays = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
-  if (ageDays < 7)   return 0.0;
-  if (ageDays < 30)  return 0.8;
-  if (ageDays < 90)  return 1.0;
-  if (ageDays < 365) return 1.1;
-  if (ageDays < 730) return 1.2;
-  return 1.3;
-}
-
-export function computeVoteWeight(voterProfile) {
-  const tier    = (voterProfile?.rank_tier || 'bronze').toLowerCase();
-  const tierMult = TIER_MULTIPLIERS[tier] ?? 1.0;
-  const ageMult  = accountAgeMultiplier(voterProfile);
-  return Math.round(tierMult * ageMult * 100) / 100;
-}
-
-export function voteWeightBreakdown(voterProfile) {
-  const tier     = (voterProfile?.rank_tier || 'bronze').toLowerCase();
-  const tierMult = TIER_MULTIPLIERS[tier] ?? 1.0;
-  const ageMult  = accountAgeMultiplier(voterProfile);
-  const total    = Math.round(tierMult * ageMult * 100) / 100;
-  return { tier, tierMult, ageMult, total };
-}
-
 export function useVoting() {
-  async function castRating({ battleId, submission, voterId, voterProfile, rating, description = '' }) {
+  async function castRating({ battleId, submission, voterId, rating, description = '' }) {
     if (!supabase) throw new Error('Supabase not initialized');
     if (!voterId) throw new Error('Must be logged in to vote');
     if (submission.user_id === voterId) throw new Error('YOU CANNOT VOTE YOUR OWN SUBMISSION');
 
-    const weight = computeVoteWeight(voterProfile);
-    const weightedRating = Math.round(rating * weight * 100) / 100;
+    const weight = 1;
 
     const { data: existing } = await supabase
       .from('votes')
@@ -54,8 +15,8 @@ export function useVoting() {
       .eq('voter_id', voterId)
       .maybeSingle();
 
-    const prevWeightedRating = existing ? (existing.rating || 0) * (existing.weight || 1) : 0;
-    const delta = Math.round((weightedRating - prevWeightedRating) * 100) / 100;
+    const prevRating = existing ? (existing.rating || 0) : 0;
+    const delta = Math.round((rating - prevRating) * 100) / 100;
 
     const writeQuery = existing
       ? supabase
@@ -83,13 +44,12 @@ export function useVoting() {
     });
 
     if (rpcError) {
-      // Fallback: recompute aggregate from votes table
       const { data: allVotes } = await supabase
         .from('votes')
-        .select('rating, weight')
+        .select('rating')
         .eq('submission_id', submission.id);
       if (allVotes?.length) {
-        const total = allVotes.reduce((sum, v) => sum + (v.rating || 0) * (v.weight || 1), 0);
+        const total = allVotes.reduce((sum, v) => sum + (v.rating || 0), 0);
         await supabase.from('submissions').update({ rating_total: total, vote_count: allVotes.length }).eq('id', submission.id);
       }
     }
@@ -97,31 +57,31 @@ export function useVoting() {
     return { rating, weight, delta };
   }
 
-  async function stopVoting(battleId, userId, stopped = true) {
+  async function stopVoting(roomId, userId, stopped = true) {
     const { error } = await supabase
       .from('room_members')
       .update({ voting_stopped: stopped })
-      .eq('room_id', battleId)
+      .eq('room_id', roomId)
       .eq('user_id', userId);
     if (error) throw error;
   }
 
-  async function getVotersWhoStopped(battleId) {
+  async function getVotersWhoStopped(roomId) {
     const { data } = await supabase
       .from('room_members')
       .select('user_id')
-      .eq('room_id', battleId)
+      .eq('room_id', roomId)
       .eq('voting_stopped', true);
     return data || [];
   }
 
-  async function getTotalVoters(battleId) {
+  async function getTotalVoters(roomId) {
     const { count } = await supabase
       .from('room_members')
       .select('room_id', { count: 'exact' })
-      .eq('room_id', battleId);
+      .eq('room_id', roomId);
     return count || 0;
   }
 
-  return { castRating, stopVoting, getVotersWhoStopped, getTotalVoters, computeVoteWeight, voteWeightBreakdown };
+  return { castRating, stopVoting, getVotersWhoStopped, getTotalVoters };
 }

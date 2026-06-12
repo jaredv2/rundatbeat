@@ -67,7 +67,8 @@ export default function SocialHub({ producers = [] }) {
     try {
       const { data, error } = await supabase.from('rooms').insert({ name: roomName.trim().toUpperCase(), owner_id: profile.id, max_players: 4, current_players: 1 }).select('*').single();
       if (error) throw error;
-      await supabase.from('room_members').insert({ room_id: data.id, user_id: profile.id, role: 'owner' });
+      const { error: memberErr } = await supabase.from('room_members').insert({ room_id: data.id, user_id: profile.id, role: 'owner' });
+      if (memberErr && memberErr.code !== '23505') throw memberErr;
       setRooms([data, ...rooms]);
       setSelectedRoom(data);
       addToast('ROOM CREATED');

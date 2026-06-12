@@ -4,7 +4,8 @@ import MatchmakingModal from '../components/matchmaking/MatchmakingModal';
 import QueueCard from '../components/matchmaking/QueueCard';
 import { formatNumber } from '../lib/display';
 import { playUiSound } from '../lib/sfx';
-import { DEFAULT_ELO, tierFromElo, getPlayerKFactor, computeNewElos } from '../lib/elo';
+import { DEFAULT_ELO, tierFromElo, computeNewElos } from '../lib/elo';
+import { isBattleClosing, markBattleLeaving, clearBattleLeaving } from '../hooks/useRoomStateMachine';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
@@ -173,6 +174,7 @@ export default function Home() {
     if (!currentRoom || !profile || busy) return;
     setBusy(true);
     window.__clearReturnTo?.();
+    if (currentRoom.battle_id) markBattleLeaving(currentRoom.battle_id);
     try {
       const isRanked = currentRoom.mode === 'ranked';
 
@@ -193,6 +195,11 @@ export default function Home() {
 
       if (isRanked && currentRoom.battle_id) {
         // Guard: if battle already closed by timer FSM, skip ELO
+        if (isBattleClosing(currentRoom.battle_id)) {
+          setCurrentRoom(null);
+          await loadHomeStats();
+          return;
+        }
         const { data: currentBattle } = await supabase
           .from('battles')
           .select('status, winner_id')
@@ -233,14 +240,9 @@ export default function Home() {
 
           const eloUpdates = computeNewElos(players, ranking);
 
-          await supabase.from('battles').update({
-            status: 'closed',
-            early_closed: true,
-            winner_id: winnerId,
-          }).eq('id', currentRoom.battle_id).in('status', ['upcoming', 'active', 'voting']);
+          console.log('[Home] FORFEIT ELO:', { battleId: currentRoom.battle_id, winnerId, leaverId, eloUpdates });
 
-          await supabase.from('rooms').update({ status: 'closed' }).eq('id', currentRoom.id);
-
+          // Write ELO BEFORE closing battle
           await Promise.all(eloUpdates.map(u => {
             const prof = (profiles || []).find(p => p.id === u.user_id);
             const isWinner = u.user_id === winnerId;
@@ -254,6 +256,14 @@ export default function Home() {
             }).eq('id', u.user_id);
           }));
 
+          await supabase.from('battles').update({
+            status: 'closed',
+            early_closed: true,
+            winner_id: winnerId,
+          }).eq('id', currentRoom.battle_id).in('status', ['upcoming', 'active', 'voting']);
+
+          await supabase.from('rooms').update({ status: 'closed' }).eq('id', currentRoom.id);
+
           addToast('LEFT MATCH — OPPONENT WINS');
         } else {
           // ── 0 remaining or 2+ remain → flat penalty ──
@@ -262,8 +272,9 @@ export default function Home() {
             .select('elo, ranked_losses, battles_entered')
             .eq('id', leaverId).maybeSingle();
           const currentElo = leaverProfile?.elo ?? DEFAULT_ELO;
-          const penalty = getPlayerKFactor(currentElo, currentElo);
-          const newElo = Math.max(0, currentElo - penalty);
+          const newElo = Math.max(0, currentElo - 3);
+
+          console.log('[Home] LEAVE PENALTY:', { leaverId, oldElo: currentElo, newElo, delta: -3 });
 
           await supabase.from('profiles').update({
             elo: newElo,
@@ -279,7 +290,7 @@ export default function Home() {
                 .eq('id', currentRoom.battle_id).in('status', ['upcoming', 'active', 'voting']),
             ]);
           }
-          addToast(`LEFT MATCH -${Math.round(penalty)} ELO`);
+          addToast(`LEFT MATCH -3 ELO`);
         }
       } else {
         // ── Non-ranked ──
@@ -300,6 +311,7 @@ export default function Home() {
     } catch (error) {
       addToast(error.message || 'COULD NOT LEAVE ROOM', 'error');
     } finally {
+      if (currentRoom?.battle_id) clearBattleLeaving(currentRoom.battle_id);
       setBusy(false);
     }
   }

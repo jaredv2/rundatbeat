@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-export async function createRoom({ isPublic, hostId, maxPlayers = 4, battleMinutes = 45, songLengthSeconds = 60, votingMinutes = 3, name }) {
+export async function createRoom({ isPublic, hostId, maxPlayers = 4, battleMinutes = 45, songLengthSeconds = 60, votingMinutes = 3, name, allowInstructions = true, allowRestrictions = true }) {
   const { data: room, error: roomErr } = await supabase
     .from('rooms')
     .insert({
@@ -15,6 +15,7 @@ export async function createRoom({ isPublic, hostId, maxPlayers = 4, battleMinut
       song_length_seconds: songLengthSeconds,
       voting_minutes: votingMinutes,
       battle_starts_in_seconds: 0,
+      challenge: { allowInstructions, allowRestrictions, battleMinutes },
     })
     .select('*')
     .single();
@@ -60,7 +61,7 @@ export async function advanceLobbyToActive(roomId) {
   // Optimistic lock: only advance if still in lobby
   const { data: room } = await supabase
     .from('rooms')
-    .select('mode, status, current_players, song_length_seconds, voting_minutes')
+    .select('mode, status, current_players, song_length_seconds, voting_minutes, challenge')
     .eq('id', roomId)
     .maybeSingle();
 
@@ -73,7 +74,7 @@ export async function advanceLobbyToActive(roomId) {
 
   const startDelay = 15;
   const starts = new Date(Date.now() + startDelay * 1000);
-  const duration = room?.voting_minutes || 45;
+  const duration = room?.challenge?.battleMinutes || 15;
   const songLength = room?.song_length_seconds || 60;
   const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
 
@@ -97,12 +98,19 @@ export async function advanceLobbyToActive(roomId) {
     if (battleErr) throw battleErr;
 
     // Optimistic lock: only update room if still in lobby (prevents duplicate battles)
+    // Preserve challenge settings (allowInstructions, allowRestrictions, battleMinutes)
+    const { data: existingRoom } = await supabase.from('rooms').select('challenge').eq('id', roomId).maybeSingle();
+    const existingChallenge = existingRoom?.challenge || {};
     const { data: updatedRoom, error: roomUpdateErr } = await supabase
       .from('rooms')
       .update({
         battle_id: battle.id,
         status: 'locked',
-        challenge: null,
+        challenge: {
+          allowInstructions: existingChallenge.allowInstructions !== false,
+          allowRestrictions: existingChallenge.allowRestrictions !== false,
+          battleMinutes: existingChallenge.battleMinutes || duration,
+        },
         countdown_started_at: null,
         battle_starts_in_seconds: startDelay,
       })
@@ -126,7 +134,7 @@ export async function advanceLobbyToActive(roomId) {
 
 // Fetch sample + generate AI challenge for a custom room (called during challenge reveal)
 export async function generateCustomRoomChallenge(roomId) {
-  const genres = ['trap', 'hip-hop', 'uk-drill', 'rap'];
+  const genres = ['trap', 'edm', 'hip-hop'];
   const genre = genres[Math.floor(Math.random() * genres.length)];
 
   const { count: playerCount } = await supabase
@@ -155,6 +163,16 @@ export async function generateCustomRoomChallenge(roomId) {
   challengePayload.instructions = aiJson.instruction || '';
   challengePayload.restrictionsList = restrictionsText;
 
+  // Preserve room settings from existing challenge
+  const { data: existingRoom } = await supabase.from('rooms').select('challenge').eq('id', roomId).maybeSingle();
+  if (existingRoom?.challenge) {
+    challengePayload.allowInstructions = existingRoom.challenge.allowInstructions !== false;
+    challengePayload.allowRestrictions = existingRoom.challenge.allowRestrictions !== false;
+    if (existingRoom.challenge.battleMinutes) {
+      challengePayload.battleMinutes = existingRoom.challenge.battleMinutes;
+    }
+  }
+
   // Update room with challenge
   await supabase.from('rooms').update({ challenge: challengePayload }).eq('id', roomId);
 
@@ -177,7 +195,7 @@ export async function generateCustomRoomChallenge(roomId) {
 
 // Fetch sample + generate AI challenge for solo session (called during challenge reveal)
 export async function generateSoloChallenge(roomId, difficulty = 'medium') {
-  const genres = ['trap', 'hip-hop', 'uk-drill', 'rap'];
+  const genres = ['trap', 'edm', 'hip-hop'];
   const genre = genres[Math.floor(Math.random() * genres.length)];
 
   const { buildChallenge, buildSamplePayload } = await import('./challengeService');
