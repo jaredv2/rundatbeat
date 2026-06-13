@@ -405,7 +405,7 @@ export default function FriendsDock() {
                   <div>
                     <div className="mb-2 font-mono text-[10px] uppercase text-rdb-muted">Incoming</div>
                     {incomingRequests.map((req) => (
-                      <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-rdb-border bg-rdb-bg p-2" key={req.friendship_id}>
+                      <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-rdb-border bg-rdb-surface p-2" key={req.friendship_id}>
                         <div className="flex items-center gap-2 min-w-0">
                           {req.avatar_url ? <img loading="lazy" className="h-6 w-6 rounded object-cover" src={req.avatar_url} alt="" /> : <div className="h-6 w-6 rounded bg-rdb-surface" />}
                           <span className="truncate font-mono text-[11px] uppercase text-rdb-text">{req.username}</span>
@@ -422,7 +422,7 @@ export default function FriendsDock() {
                   <div>
                     <div className="mb-2 font-mono text-[10px] uppercase text-rdb-muted">Outgoing</div>
                     {outgoingRequests.map((req) => (
-                      <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-rdb-border bg-rdb-bg p-2" key={req.friendship_id}>
+                      <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-rdb-border bg-rdb-surface p-2" key={req.friendship_id}>
                         <div className="flex items-center gap-2 min-w-0">
                           {req.avatar_url ? <img loading="lazy" className="h-6 w-6 rounded object-cover" src={req.avatar_url} alt="" /> : <div className="h-6 w-6 rounded bg-rdb-surface" />}
                           <span className="truncate font-mono text-[11px] uppercase text-rdb-text">{req.username}</span>
@@ -443,7 +443,7 @@ export default function FriendsDock() {
                   const unread = unreadByFriend[friend.id] || 0;
                   return (
                     <div
-                      className={`relative flex cursor-pointer items-center gap-2 rounded-md border px-2 py-2 text-left ${selectedFriendId === friend.id ? 'border-rdb-orange bg-rdb-surface' : 'border-rdb-border bg-rdb-bg'}`}
+                      className={`relative flex cursor-pointer items-center gap-2 rounded-md border px-2 py-2 text-left ${selectedFriendId === friend.id ? 'border-rdb-orange bg-rdb-surface' : 'border-rdb-border bg-rdb-surface'}`}
                       key={friend.id}
                       role="button"
                       tabIndex={0}
@@ -480,7 +480,7 @@ export default function FriendsDock() {
                     </div>
                   );
                 })}
-                {!friends.length && <div className="rounded-md border border-rdb-border bg-rdb-bg p-3 font-mono text-[11px] uppercase text-rdb-muted">No friends yet.</div>}
+                {!friends.length && <div className="rounded-md border border-rdb-border bg-rdb-surface p-3 font-mono text-[11px] uppercase text-rdb-muted">No friends yet.</div>}
               </div>
             )}
           </>

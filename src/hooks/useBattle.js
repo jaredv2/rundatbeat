@@ -183,12 +183,12 @@ export function useBattle(id) {
 
       setSubscribedBattleId(battleIdRef.current);
       setSubscribedRoomId(roomIdRef.current);
-    } catch (err) {
-      // refresh error — silently ignore (realtime will catch up)
-    } finally {
-      setLoading(false);
       loadedRef.current = true;
+    } catch (err) {
+      // refresh error — keep loading true, polling will retry
+    } finally {
       refreshingRef.current = false;
+      if (loadedRef.current) setLoading(false);
     }
   }
 

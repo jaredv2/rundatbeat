@@ -284,7 +284,7 @@ export default function Battle() {
   const soloAiRetries = useRef(0);
   useEffect(() => {
     if (!isSolo || phase !== 'upcoming' || !room?.id || soloAiFired.current) return;
-    if (room?.challenge?.instructions) return;
+    if (room?.challenge?.restrictionsList) return;
     soloAiFired.current = true;
 
     const MAX_RETRIES = 3;
@@ -326,7 +326,7 @@ export default function Battle() {
       }).eq('id', room.battle_id);
     }
     tryGenerate();
-  }, [isSolo, phase, room?.id, room?.challenge?.instructions, soloDifficulty]);
+  }, [isSolo, phase, room?.id, room?.challenge?.restrictionsList, soloDifficulty]);
 
   // ── Detect win/loss when battle closes ────────────────────────────────────
   const wasClosed = useRef(false);
@@ -646,7 +646,7 @@ export default function Battle() {
     <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center py-12">
       <div className="mx-auto w-full max-w-2xl space-y-5">
         {phase === 'upcoming' ? (
-          room?.challenge?.instructions ? (
+          room?.challenge ? (
             <SampleCard challenge={room.challenge} phase={phase} room={room} />
           ) : (
             <div className="rdb-panel p-8 text-center">

@@ -1,5 +1,32 @@
 import { supabase } from './supabase';
 
+export const RESTRICTION_POOL = [
+  "No melodies — drums and 808 only alongside the sample",
+  "No 808 — let the sample carry the low end",
+  "The beat must feel empty — max 3 elements total including the sample",
+  "No hi-hats — kick and snare only",
+  "Sample must be pitched down at least 2 semitones from its original pitch",
+  "No snare — only kick and hi-hats",
+  "No more than one drum element playing at any time",
+  "No reverb on anything — everything must sound dry and close",
+  "No kicks — 808 and hi-hats carry the rhythm",
+  "The beat must be under 60 seconds — short and punchy",
+  "No chord pads or sustained synths — single note leads only",
+  "No bass of any kind — no 808, no sub, no bass synth",
+  "Every element must cut out for at least one full bar somewhere in the beat",
+  "No samples other than the provided one — all other sounds must be synthesized",
+  "The beat must have a full 4 bar intro with no drums — sample only",
+  "No more than 2 elements playing simultaneously at any point",
+  "Hi-hats must stay on straight 8th notes — no triplets, no rolls",
+  "The 808 must be a different note on every single bar — no repeating patterns",
+  "No effects on the sample — use it completely dry, no EQ, no reverb, no compression",
+  "The beat must drop to silence for exactly one bar in the middle",
+];
+
+export function pickFromPool() {
+  return RESTRICTION_POOL[Math.floor(Math.random() * RESTRICTION_POOL.length)];
+}
+
 export function difficultyFromTier(tier) {
   const order = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'elite', 'champion', 'goat'];
   const idx = order.indexOf(tier?.toLowerCase() || 'bronze');
@@ -33,46 +60,37 @@ const SOLO_DIFFICULTY = {
   easy: {
     label: 'easy',
     instructionStyle: 'simple creative direction — pick one vibe or mood for the beat.',
-    restrictions: '1 basic restriction. A single, obvious thing to do (e.g. "use a snare on beats 2 and 4"). No creative judgment required.',
   },
   medium: {
     label: 'medium',
     instructionStyle: 'clear creative direction — combine the loop\'s mood with a specific energy or context.',
-    restrictions: '1 restriction that requires creative choice — pick a specific pattern, sound, or technique. Not just "use X" but "use X in a specific way".',
   },
   hard: {
     label: 'hard',
     instructionStyle: 'detailed creative direction — reference the loop\'s specific character and push the producer\'s skill.',
-    restrictions: '1 restriction that demands technical execution — specific rhythm, transition, or effect. Must be deliberately placed, not random.',
   },
   expert: {
     label: 'expert',
     instructionStyle: 'demanding creative direction — require structural or arrangement-level thinking, not just sound selection.',
-    restrictions: '1 restriction that involves arrangement, dynamics, or interlocking parts. Producer must plan ahead, not just layer.',
   },
   impossible: {
     label: 'impossible',
     instructionStyle: 'extreme creative direction — require multiple simultaneous constraints and creative problem-solving.',
-    restrictions: '1 restriction that combines multiple elements or requires unconventional approaches. Still audibly verifiable but very challenging.',
   },
 };
 
 const RANKED_DIFFICULTY = {
   easy: {
     instructionStyle: 'straightforward creative direction — match the loop\'s mood with a clear context.',
-    restrictions: '1 simple restriction. One obvious drum/bass choice or arrangement/FX choice. Producers at this tier should feel comfortable.',
   },
   medium: {
     instructionStyle: 'solid creative direction — push beyond basic, require some intentionality.',
-    restrictions: '1 restriction that requires a deliberate pattern choice — not random layering. Requires timing or placement.',
   },
   hard: {
     instructionStyle: 'ambitious creative direction — demand technical control and musical decision-making.',
-    restrictions: '1 restriction that involves a specific technique — transition, automation, or rhythmic variation. Must sound intentional.',
   },
   very_hard: {
     instructionStyle: 'advanced creative direction — require arrangement-level thinking and multi-part coordination.',
-    restrictions: '1 complex restriction — involves dynamics, automation, or interlocking parts. Still audibly verifiable.',
   },
 };
 
@@ -112,12 +130,11 @@ LOOP CONTEXT:
 
 RULES:
   1. The instruction MUST start with "Make a ${genre} beat that..." and reference the loop's title or mood.
-  2. Generate exactly 1 restriction — a short, hearable audio constraint. One sentence. No complex rules.
-  3. Do NOT mention BPM, key, or technical music theory. Keep it creative and vibe-based.
-  4. Title MUST end with "TYPE BEAT".
+  2. Do NOT mention BPM, key, or technical music theory. Keep it creative and vibe-based.
+  3. Title MUST end with "TYPE BEAT".
 
-Return ONLY raw valid JSON with keys: instruction (string), restrictions (array of 1 string), title (string), flavor_text (string). No markdown, no backticks.`;
-    userMessage = `Ranked challenge using a ${genre} loop titled "${loopTitle}". Make 1 creative, hearable restriction.`;
+Return ONLY raw valid JSON with keys: instruction (string), title (string), flavor_text (string). No markdown, no backticks.`;
+    userMessage = `Ranked challenge using a ${genre} loop titled "${loopTitle}".`;
 
   } else if (mode === 'solo') {
     const diff = SOLO_DIFFICULTY[difficulty] || SOLO_DIFFICULTY.medium;
@@ -129,12 +146,11 @@ LOOP CONTEXT:
 
 RULES:
   1. The instruction MUST start with "Make a ${genre} beat that..." and reference the loop's title or vibe.
-  2. Generate exactly 1 restriction — a short, hearable audio constraint. One sentence. No complex rules.
-  3. Do NOT mention BPM, key, or technical music theory. Keep it creative and vibe-based.
-  4. Title MUST end with "TYPE BEAT".
+  2. Do NOT mention BPM, key, or technical music theory. Keep it creative and vibe-based.
+  3. Title MUST end with "TYPE BEAT".
 
-Return ONLY raw valid JSON with keys: instruction (string), restrictions (array of 1 string), title (string), flavor_text (string). No markdown, no backticks.`;
-    userMessage = `Solo ${diff.label} practice session using a ${genre} loop titled "${loopTitle}" at ${loopBpm}bpm in ${loopKey}. Match difficulty to the level description. Reference the loop's mood in the instruction. Generate 1 restriction.`;
+Return ONLY raw valid JSON with keys: instruction (string), title (string), flavor_text (string). No markdown, no backticks.`;
+    userMessage = `Solo ${diff.label} practice session using a ${genre} loop titled "${loopTitle}" at ${loopBpm}bpm in ${loopKey}. Match difficulty to the level description. Reference the loop's mood in the instruction.`;
 
   } else {
     const diffLabel = roomDifficultyLabel(playerCount);
@@ -151,20 +167,14 @@ LOOP CONTEXT:
 
 PLAYERS: ${playerCount} — difficulty: ${diffLabel}
 Instruction direction: ${diff.instructionStyle}
-Restrictions direction: ${diff.restrictions}
-
-GENRE REFERENCE — pull restriction ideas from this:
-  ${genreGuide}
 
 RULES:
   1. The instruction MUST start with "Make a ${genre} beat that..." and reference the loop's title or mood.
-  2. Generate exactly 1 restriction — a short, hearable audio constraint scaled to the player count.
-  3. Fewer players = easier restriction. More players = tighter, more demanding constraint.
-  4. Use BPM and key to make the restriction specific to this loop.
-  5. Title MUST end with "TYPE BEAT".
+  2. Use BPM and key to make the instruction specific to this loop.
+  3. Title MUST end with "TYPE BEAT".
 
-Return ONLY raw valid JSON with keys: instruction (string), restrictions (array of 1 string), title (string), flavor_text (string). No markdown, no backticks.`;
-    userMessage = `Room challenge for ${playerCount} players using a ${genre} loop titled "${loopTitle}" at ${loopBpm}bpm in ${loopKey}. Scale the restriction to the player count. Reference the loop's mood. Generate 1 restriction.`;
+Return ONLY raw valid JSON with keys: instruction (string), title (string), flavor_text (string). No markdown, no backticks.`;
+    userMessage = `Room challenge for ${playerCount} players using a ${genre} loop titled "${loopTitle}" at ${loopBpm}bpm in ${loopKey}. Reference the loop's mood.`;
   }
 
   const { data, error } = await supabase.functions.invoke('groq-proxy', {
@@ -178,6 +188,8 @@ Return ONLY raw valid JSON with keys: instruction (string), restrictions (array 
   }
 
   if (!data?.json) throw new Error("AI generation failed — empty response");
+
+  data.json.restrictions = [pickFromPool()];
 
   return { json: data.json, raw: data.raw || '' };
 }

@@ -216,11 +216,9 @@ export async function generateSoloChallenge(roomId, difficulty = 'medium') {
   // Update room with challenge
   await supabase.from('rooms').update({ challenge: challengePayload }).eq('id', roomId);
 
-  // Update battle with AI content
+  // Update battle with AI content (don't overwrite status/timing — advanceLobbyToActive already set those)
   const { data: room } = await supabase.from('rooms').select('battle_id').eq('id', roomId).maybeSingle();
   if (room?.battle_id) {
-    const starts = new Date(Date.now());
-    const votingEnds = new Date(starts.getTime() + 35 * 60 * 1000);
     await supabase.from('battles').update({
       title: aiJson.title || challengePayload.title,
       prompt_text: aiJson.instruction || '',
@@ -229,9 +227,6 @@ export async function generateSoloChallenge(roomId, difficulty = 'medium') {
       mood: aiJson.flavor_text || aiJson.mood || '',
       restrictions: restrictionsText,
       flavor_text: aiJson.flavor_text || '',
-      status: 'upcoming',
-      starts_at: starts.toISOString(),
-      voting_ends_at: votingEnds.toISOString(),
     }).eq('id', room.battle_id);
   }
 

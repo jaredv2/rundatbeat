@@ -160,8 +160,8 @@ export default function NotificationBell() {
               notifications.map((notif) => (
                 <button
                   key={notif.id}
-                  className={`w-full text-left px-3 py-2.5 border-b border-rdb-border hover:bg-rdb-bg transition-colors ${
-                    !notif.read_at ? 'bg-rdb-bg/50' : ''
+                  className={`w-full text-left px-3 py-2.5 border-b border-rdb-border hover:bg-rdb-surface transition-colors ${
+                    !notif.read_at ? 'bg-rdb-surface/50' : ''
                   }`}
                   type="button"
                   onClick={() => handleClick(notif)}

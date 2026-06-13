@@ -36,7 +36,7 @@ export default function ReportButton({ reportedUserId, battleId }) {
     <div className="relative">
       <button className="rdb-button" type="button" onClick={() => { playUiSound('click'); setOpen(!open); }}>REPORT</button>
       {open && (
-        <div className="absolute right-0 top-9 z-20 w-[260px] border border-rdb-border bg-rdb-bg p-3 text-left">
+        <div className="absolute right-0 top-9 z-20 w-[260px] border border-rdb-border bg-rdb-surface p-3 text-left">
           <label className="grid gap-2 font-mono text-[11px] uppercase text-rdb-muted">
             Reason
             <select className="rdb-input" value={reason} onChange={(event) => setReason(event.target.value)}>

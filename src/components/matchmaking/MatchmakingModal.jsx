@@ -169,17 +169,17 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-center overflow-y-auto bg-black/55 p-4 py-8 backdrop-blur-xl">
+    <div className="fixed inset-0 z-40 flex justify-center overflow-y-auto bg-black/70 p-4 py-8 backdrop-blur-xl">
       <section className="apple-modal my-auto w-full max-w-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold tracking-tight text-rdb-text">Play</h2>
-            <p className="mt-1 text-sm text-rdb-muted">Choose a match type.</p>
+            <p className="mt-1 text-sm text-rdb-text/60">Choose a match type.</p>
           </div>
           <button className="apple-icon-button" type="button" onClick={() => { playUiSound('cancel'); onClose(); }}><X size={16} /></button>
         </div>
 
-        <div className="mt-6 grid grid-cols-3 rounded-lg bg-white/5 p-1">
+        <div className="mt-6 grid grid-cols-3 rounded-lg bg-rdb-bg/60 p-1">
           {[
             ['ranked', 'Ranked'],
             ['solo', 'Solo'],
@@ -208,13 +208,13 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                   <button
                     key={opt.value}
                     type="button"
-                    className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${roomSetup.soloDifficulty === opt.value ? 'border-rdb-orange bg-rdb-orange/10' : 'border-rdb-border bg-rdb-bg/40 hover:border-rdb-orange/50'}`}
+                    className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${roomSetup.soloDifficulty === opt.value ? 'border-rdb-orange bg-rdb-orange/10' : 'border-rdb-border bg-rdb-bg/50 hover:border-rdb-orange/50'}`}
                     onClick={() => { playUiSound('click'); updateRoomSetup('soloDifficulty', opt.value); }}
                   >
                     <span className="text-xl leading-none">{opt.icon}</span>
                     <div>
                       <div className="font-mono text-[12px] font-bold uppercase text-rdb-text">{opt.label}</div>
-                      <div className="mt-0.5 font-mono text-[10px] uppercase text-rdb-muted">{opt.desc}</div>
+                      <div className="mt-0.5 font-mono text-[10px] uppercase text-rdb-text/50">{opt.desc}</div>
                     </div>
                   </button>
                 ))}
@@ -239,10 +239,10 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-semibold text-rdb-text">Ranked Queue</div>
-                  <div className="mt-1 text-xs uppercase text-rdb-muted">{tier} tier • all tiers welcome</div>
+                  <div className="mt-1 text-xs uppercase text-rdb-text/50">{tier} tier • all tiers welcome</div>
                 </div>
               </div>
-              <div className="mt-4 font-mono text-[11px] uppercase text-rdb-muted text-center py-8">
+              <div className="mt-4 font-mono text-[11px] uppercase text-rdb-text/40 text-center py-8">
                 Find a match and get taken to the lobby
               </div>
             </div>
@@ -262,13 +262,13 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                   const memberCount = room.room_members?.[0]?.count || room.current_players || 0;
                   const isFull = memberCount >= (room.max_players || 4);
                   return (
-                    <div className="grid gap-2 rounded-lg border border-rdb-border bg-rdb-surface p-3" key={room.id}>
+                    <div className="grid gap-2 rounded-lg border border-rdb-border bg-rdb-bg p-3" key={room.id}>
                       <span>
                         <span className="block font-mono text-[12px] uppercase text-rdb-text">{room.name}</span>
-                        <span className="block font-mono text-[10px] uppercase text-rdb-muted">{room.battles?.status || room.status}</span>
+                        <span className="block font-mono text-[10px] uppercase text-rdb-text/50">{room.battles?.status || room.status}</span>
                       </span>
                       <div className="flex items-center justify-between gap-2">
-                        <span className={`font-mono text-[11px] uppercase ${isFull ? 'text-rdb-red' : 'text-rdb-muted'}`}>{memberCount}/{room.max_players || 4}{isFull ? ' FULL' : ''}</span>
+                        <span className={`font-mono text-[11px] uppercase ${isFull ? 'text-rdb-red' : 'text-rdb-text/50'}`}>{memberCount}/{room.max_players || 4}{isFull ? ' FULL' : ''}</span>
                         <div className="flex gap-2">
                           {!isOwner && !isFull && (
                             <button className="rdb-button rdb-button-primary" disabled={status === 'busy'} type="button" onClick={async () => {
@@ -290,8 +290,8 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                     </div>
                   );
                 })}
-                {!visibleRooms.length && roomsLoading && <div className="rounded-lg border border-rdb-border bg-rdb-surface p-3 text-sm text-rdb-muted">Loading rooms...</div>}
-                {!visibleRooms.length && !roomsLoading && <div className="rounded-lg border border-rdb-border bg-rdb-surface p-3 text-sm text-rdb-muted">No public rooms yet.</div>}
+                {!visibleRooms.length && roomsLoading && <div className="rounded-lg border border-rdb-border bg-rdb-bg p-3 text-sm text-rdb-text/50">Loading rooms...</div>}
+                {!visibleRooms.length && !roomsLoading && <div className="rounded-lg border border-rdb-border bg-rdb-bg p-3 text-sm text-rdb-text/50">No public rooms yet.</div>}
               </div>
             </div>
             <div className="rounded-lg border border-rdb-border bg-rdb-bg/70 p-3">
@@ -311,8 +311,8 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                 <LabeledField icon={<Timer size={13} />} label="Voting Min">
                   <input className="rdb-input" min="1" max="60" type="number" value={roomSetup.votingMinutes} onChange={(event) => updateRoomSetup('votingMinutes', Number(event.target.value))} />
                 </LabeledField>
-                <div className="border border-rdb-border bg-rdb-bg/60 p-2">
-                  <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-muted"><Users size={13} />Max Players: {roomSetup.maxPlayers}</span>
+                <div className="border border-rdb-border bg-rdb-bg/50 p-2">
+                  <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Users size={13} />Max Players: {roomSetup.maxPlayers}</span>
                   <input
                     className="w-full accent-rdb-orange"
                     type="range"
@@ -321,7 +321,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                     value={roomSetup.maxPlayers}
                     onChange={(event) => updateRoomSetup('maxPlayers', Number(event.target.value))}
                   />
-                  <div className="flex justify-between font-mono text-[9px] uppercase text-rdb-muted">
+                  <div className="flex justify-between font-mono text-[9px] uppercase text-rdb-text/40">
                     <span>2</span><span>10</span>
                   </div>
                 </div>
@@ -333,7 +333,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                       onChange={(e) => updateRoomSetup('allowInstructions', e.target.checked)}
                       className="accent-rdb-orange"
                     />
-                    <span className="font-mono text-[10px] uppercase text-rdb-muted">Allow Instructions</span>
+                    <span className="font-mono text-[10px] uppercase text-rdb-text/50">Allow Instructions</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -342,7 +342,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                       onChange={(e) => updateRoomSetup('allowRestrictions', e.target.checked)}
                       className="accent-rdb-orange"
                     />
-                    <span className="font-mono text-[10px] uppercase text-rdb-muted">Allow Restrictions</span>
+                    <span className="font-mono text-[10px] uppercase text-rdb-text/50">Allow Restrictions</span>
                   </label>
                 </div>
               </div>
@@ -383,7 +383,7 @@ function formatNumber(n) {
 function LabeledField({ icon, label, children }) {
   return (
     <label className="block">
-      <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-muted">{icon}{label}</span>
+      <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50">{icon}{label}</span>
       {children}
     </label>
   );

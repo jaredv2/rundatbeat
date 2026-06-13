@@ -45,7 +45,7 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
   // Fire AI generation in background during the 15s reveal countdown
   useEffect(() => {
     if (!battleId || !roomId || aiFired.current) return;
-    if (challenge?.instructions) return;
+    if (challenge?.restrictionsList) return;
     aiFired.current = true;
 
     if (roomMode === 'room') {
@@ -70,7 +70,7 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
         }
       })();
     }
-  }, [battleId, roomId, challenge?.instructions, roomMode, difficulty]);
+  }, [battleId, roomId, challenge?.restrictionsList, roomMode, difficulty]);
 
   // Recalculate total duration from the target time
   useEffect(() => {
@@ -191,34 +191,24 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
           )}
 
           {/* Loading indicator for partial challenge (has genre/bpm but no instructions yet) */}
-          {!hideChallenge && challenge && !challenge.instructions && !challenge.restrictionsList && !revealed && (
+          {!hideChallenge && challenge && !challenge.restrictionsList && !revealed && (
             <div className="flex items-center justify-center gap-2 pt-1">
               <span className="h-3 w-3 animate-spin rounded-full border-2 border-rdb-orange/50 border-t-transparent" />
               <span className="font-mono text-[10px] uppercase text-rdb-muted/60">
-                GENERATING INSTRUCTIONS...
+                GENERATING CHALLENGE...
               </span>
             </div>
           )}
 
           {/* Full challenge preview when revealed */}
-          {!hideChallenge && revealed && challenge?.instructions && (
+          {!hideChallenge && revealed && challenge && challenge.restrictionsList && (
             <div className="space-y-3 pt-2 text-left">
-              {challenge.allowInstructions !== false && challenge.instructions && (
-                <div>
-                  <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>
-                  <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-3">
-                    {challenge.instructions}
-                  </p>
-                </div>
-              )}
-              {challenge.allowRestrictions !== false && challenge.restrictionsList && (
-                <div>
-                  <p className="font-mono text-[10px] uppercase text-rdb-red mb-1">RESTRICTIONS</p>
-                  <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-3">
-                    {challenge.restrictionsList}
-                  </p>
-                </div>
-              )}
+              <div>
+                <p className="font-mono text-[10px] uppercase text-rdb-red mb-1">RESTRICTIONS</p>
+                <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-3">
+                  {challenge.restrictionsList}
+                </p>
+              </div>
             </div>
           )}
         </div>

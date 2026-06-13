@@ -203,7 +203,7 @@ export default function SocialHub({ producers = [] }) {
           {!rooms.length && <div className="border-t border-rdb-border py-3 font-mono text-[11px] uppercase text-rdb-muted">NO ROOMS YET.</div>}
         </div>
 
-        <div className="mt-5 border border-rdb-border bg-rdb-bg p-3">
+        <div className="mt-5 border border-rdb-border bg-rdb-surface p-3">
           <div className="font-mono text-[11px] uppercase text-rdb-orange">{selectedRoom?.name || 'ROOM CHAT'}</div>
           <div className="mt-3 h-32 overflow-y-auto border-y border-rdb-border py-2 font-mono text-[11px] uppercase">
             {roomMessages.map((message) => (
@@ -231,7 +231,7 @@ export default function SocialHub({ producers = [] }) {
         </div>
         <div className="mt-4 border-t border-rdb-border pt-3">
           <div className="font-mono text-[11px] uppercase text-rdb-orange">{friend ? `${friend.username} CHAT` : 'FRIEND CHAT'}</div>
-          <div className="mt-2 h-28 overflow-y-auto bg-rdb-bg p-2 font-mono text-[11px] uppercase">
+          <div className="mt-2 h-28 overflow-y-auto bg-rdb-surface p-2 font-mono text-[11px] uppercase">
             {friendMessages.map((message) => <div className="mb-2 text-rdb-muted" key={message.id}>{message.sender_id === profile?.id ? 'YOU' : friend?.username}: {message.body}</div>)}
             {!friendMessages.length && <div className="text-rdb-muted">SELECT A FRIEND.</div>}
           </div>

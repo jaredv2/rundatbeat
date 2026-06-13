@@ -319,7 +319,7 @@ export default function Admin() {
             {tierDistribution.map((t) => (
               <div key={t.tier} className="flex items-center gap-3">
                 <div className="w-20 font-mono text-xs uppercase" style={{ color: TIER_COLORS[t.tier] || '#fff' }}>{t.tier}</div>
-                <div className="flex-1 rounded bg-rdb-bg">
+                <div className="flex-1 rounded bg-rdb-surface">
                   <div
                     className="rounded px-1 py-1.5 text-right font-mono text-xs text-black transition-all"
                     style={{ width: `${(t.count / maxTier) * 100}%`, minWidth: t.count ? 20 : 0, backgroundColor: TIER_COLORS[t.tier] || '#888' }}
@@ -339,7 +339,7 @@ export default function Admin() {
             {modeDistribution.map((m) => (
               <div key={m.mode} className="flex items-center gap-3">
                 <div className="w-24 font-mono text-xs uppercase text-rdb-muted">{m.mode}</div>
-                <div className="flex-1 rounded bg-rdb-bg">
+                <div className="flex-1 rounded bg-rdb-surface">
                   <div
                     className="rounded bg-rdb-orange px-1 py-1.5 text-right font-mono text-xs text-black transition-all"
                     style={{ width: `${(m.count / maxMode) * 100}%`, minWidth: m.count ? 20 : 0 }}
@@ -360,7 +360,7 @@ export default function Admin() {
           {eloBuckets.map((b) => (
             <div key={b.label} className="flex items-center gap-3">
               <div className="w-24 font-mono text-xs uppercase text-rdb-muted">{b.label}</div>
-              <div className="flex-1 rounded bg-rdb-bg">
+              <div className="flex-1 rounded bg-rdb-surface">
                 <div
                   className="rounded bg-purple-500 px-1 py-1.5 text-right font-mono text-xs text-black transition-all"
                   style={{ width: `${(b.count / maxEloBucket) * 100}%`, minWidth: b.count ? 20 : 0 }}
@@ -521,11 +521,11 @@ function Stat({ label, value }) {
 }
 
 function Empty({ label }) {
-  return <div className="rounded border border-rdb-border bg-rdb-bg p-3 font-mono text-[11px] uppercase text-rdb-muted">{label}</div>;
+  return <div className="rounded border border-rdb-border bg-rdb-surface p-3 font-mono text-[11px] uppercase text-rdb-muted">{label}</div>;
 }
 
 function PlayerLine({ user }) {
-  return <Link className="rounded border border-rdb-border bg-rdb-bg p-3 font-mono text-[11px] uppercase hover:border-rdb-orange" to={`/profile/${user.username}`}>{user.username} - {user.rank_tier || 'bronze'}</Link>;
+  return <Link className="rounded border border-rdb-border bg-rdb-surface p-3 font-mono text-[11px] uppercase hover:border-rdb-orange" to={`/profile/${user.username}`}>{user.username} - {user.rank_tier || 'bronze'}</Link>;
 }
 
 function UserAdjust({ user, onAdjust, onBan, onUnban, onRemoveCustoms }) {

@@ -56,7 +56,7 @@ export default function Settings() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-[110px_1fr]">
-          {profile.avatar_url ? <img loading="lazy" className="h-24 w-24 rounded-lg border border-rdb-border object-cover" src={profile.avatar_url} alt="" /> : <div className="h-24 w-24 rounded-lg border border-rdb-border bg-rdb-bg" />}
+          {profile.avatar_url ? <img loading="lazy" className="h-24 w-24 rounded-lg border border-rdb-border object-cover" src={profile.avatar_url} alt="" /> : <div className="h-24 w-24 rounded-lg border border-rdb-border bg-rdb-surface" />}
           <div>
             <label className="font-mono text-[11px] uppercase text-rdb-muted" htmlFor="avatar">Profile picture</label>
             <input id="avatar" className="rdb-input mt-2" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => setFile(event.target.files?.[0] || null)} />

@@ -111,20 +111,29 @@ function WaveformPlayerInner({ url, profile }) {
 
   return (
     <div className="flex w-full items-center gap-3">
-      <button
-        className="rdb-button rdb-button-primary w-20 shrink-0"
-        type="button"
-        disabled={!ready}
-        onClick={handlePlayPause}
-      >
-        {!loaded ? 'LOADING' : playing ? 'PAUSE' : 'PLAY'}
-      </button>
+      {loaded && (
+        <button
+          className="rdb-button rdb-button-primary w-20 shrink-0"
+          type="button"
+          disabled={!ready}
+          onClick={handlePlayPause}
+        >
+          {playing ? 'PAUSE' : 'PLAY'}
+        </button>
+      )}
 
       <div
         ref={containerRef}
-        className="waveform-strip min-w-0 w-full flex-1"
+        className="waveform-strip relative min-w-0 w-full flex-1"
         style={{ background: 'transparent' }}
-      />
+      >
+        {!loaded && !error && (
+          <div className="absolute inset-0 flex items-center justify-center gap-2">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-rdb-border border-t-rdb-orange" />
+            <span className="font-mono text-xs text-rdb-muted">Loading...</span>
+          </div>
+        )}
+      </div>
 
       {error && (
         <span className="font-mono text-[10px] uppercase text-rdb-muted">

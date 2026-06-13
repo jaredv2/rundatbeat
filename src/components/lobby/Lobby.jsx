@@ -113,7 +113,7 @@ export default function Lobby({ room, members, onReadyChange }) {
           return (
             <div
               key={member.user_id}
-              className="flex items-center justify-between gap-2 rounded border border-rdb-border bg-rdb-bg px-3 py-2"
+              className="flex items-center justify-between gap-2 rounded border border-rdb-border bg-rdb-surface px-3 py-2"
             >
               <div className="flex items-center gap-2 min-w-0">
                 <span

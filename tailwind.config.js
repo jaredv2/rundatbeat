@@ -4,14 +4,14 @@ export default {
     extend: {
       colors: {
         rdb: {
-          bg: '#050609',
-          surface: '#11151d',
-          border: 'rgba(255, 196, 0, 0.28)',
-          orange: '#ff9d00',
-          blue: '#22d3ee',
-          text: '#f0f0f0',
-          muted: '#8d93a1',
-          red: '#ff3d5a',
+          bg: '#0f1218',
+          surface: '#1e2333',
+          border: 'rgba(255, 255, 255, 0.12)',
+          orange: '#F5A623',
+          green: '#2ECC71',
+          text: '#e8eaf0',
+          muted: '#6b7394',
+          red: '#E74C3C',
           discord: '#5865F2',
         },
       },

@@ -8,7 +8,6 @@ export default function SampleCard({ challenge, phase, room }) {
   if (!challenge) return null;
 
   const isVoting = phase === 'voting';
-  const allowInstructions = room?.challenge?.allowInstructions !== false;
   const allowRestrictions = room?.challenge?.allowRestrictions !== false;
 
   return (
@@ -91,15 +90,6 @@ export default function SampleCard({ challenge, phase, room }) {
           loopazon.com
         </a>
       </p>
-
-      {allowInstructions && challenge.instructions && (
-        <div className="mt-4">
-          <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>
-          <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-4">
-            {challenge.instructions}
-          </p>
-        </div>
-      )}
 
       {allowRestrictions && challenge.restrictionsList && (
         <div className="mt-4">

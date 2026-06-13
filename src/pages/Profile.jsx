@@ -65,16 +65,9 @@ export default function Profile() {
   return (
     <main
       className={`profile-theme theme-${profile.active_theme || 'default'} profile-page-shell space-y-5`}
-      style={{
-        ...getProfileAccentStyle(profile),
-        '--grid-line-color': `color-mix(in srgb, var(--profile-accent) 18%, transparent)`,
-        backgroundImage: [
-          `linear-gradient(color-mix(in srgb, var(--profile-accent) 10%, transparent) 1px, transparent 1px)`,
-          `linear-gradient(90deg, color-mix(in srgb, var(--profile-accent) 10%, transparent) 1px, transparent 1px)`,
-        ].join(', '),
-      }}
+      style={getProfileAccentStyle(profile)}
     >
-      <div className="mx-auto flex max-w-[760px] items-center justify-between">
+      <div className="relative z-10 mx-auto flex max-w-[760px] items-center justify-between">
         <Link className="rdb-button" to="/"><ArrowLeft size={14} />MAIN MENU</Link>
         <div className="flex gap-2">
           {isOwnProfile && <Link className="rdb-button" to="/settings"><Settings size={14} />SETTINGS</Link>}
@@ -82,11 +75,11 @@ export default function Profile() {
         </div>
       </div>
 
-      <section className="rdb-panel mx-auto max-w-[760px] p-5" style={{ borderColor: 'var(--profile-accent)' }}>
+      <section className="rdb-panel relative z-10 mx-auto max-w-[760px] p-5" style={{ borderColor: 'var(--profile-accent)' }}>
         <div className="grid gap-4 md:grid-cols-[1fr_270px]">
-          <div className="bg-rdb-bg/30 p-5">
+          <div className="bg-rdb-surface/30 p-5">
             <div className="flex flex-col items-center gap-5 text-center sm:flex-row sm:text-left">
-              {profile.avatar_url ? <img loading="lazy" className="h-28 w-28 rounded-lg object-cover shadow-[0_0_28px_rgba(255,157,0,0.16)]" src={profile.avatar_url} alt="" /> : <div className="grid h-28 w-28 place-items-center rounded-lg bg-rdb-bg text-4xl">🎧</div>}
+              {profile.avatar_url ? <img loading="lazy" className="h-28 w-28 rounded-lg object-cover shadow-[0_0_28px_rgba(255,157,0,0.16)]" src={profile.avatar_url} alt="" /> : <div className="grid h-28 w-28 place-items-center rounded-lg bg-rdb-surface text-4xl">🎧</div>}
               <div className="min-w-0">
                 <h1 className={`truncate font-mono text-4xl font-bold uppercase leading-none ${getNameCosmeticClassName(profile)}`} style={getNameGradientStyle(profile)}>
                   {profile.nameplate_icon && <span className="mr-2 text-3xl text-rdb-orange">{getNameplateEmoji(profile.nameplate_icon)}</span>}
@@ -102,7 +95,7 @@ export default function Profile() {
             </div>
           </div>
 
-          <aside className="bg-rdb-bg/20 p-4" style={{ border: '1px solid var(--profile-accent, var(--color-rdb-border))' }}>
+          <aside className="bg-rdb-surface/20 p-4" style={{ border: '1px solid var(--profile-accent, var(--color-rdb-border))' }}>
             <div className="grid min-h-[140px] place-items-center gap-3 text-center font-mono uppercase">
               <StatBlock value={profile.elo || 1000} label="ELO" />
               <StatBlock value={rankedWins} label="RANKED WINS" />
@@ -120,7 +113,7 @@ export default function Profile() {
         </div>
       </section>
 
-      <section className="rdb-panel mx-auto max-w-[760px] p-5" style={{ borderColor: 'var(--profile-accent)' }}>
+      <section className="rdb-panel relative z-10 mx-auto max-w-[760px] p-5" style={{ borderColor: 'var(--profile-accent)' }}>
         <div className="flex items-center justify-between gap-3">
           <h2 className="rdb-section-title">ABOUT</h2>
           {isOwnProfile && <button className="rdb-button" type="button" onClick={() => editing ? saveDescription() : setEditing(true)}>{editing ? <Save size={14} /> : <Edit3 size={14} />}{editing ? 'SAVE' : 'EDIT'}</button>}
@@ -132,7 +125,7 @@ export default function Profile() {
         )}
       </section>
 
-      <section className="mx-auto max-w-[860px]">
+      <section className="relative z-10 mx-auto max-w-[860px]">
         <h2 className="rdb-section-title">SUBMISSIONS</h2>
         <div className="mt-2 flex flex-col gap-3">
           {submissions.length === 0 && (
