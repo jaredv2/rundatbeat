@@ -12,6 +12,7 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
   const [description, setDescription] = useState('');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const addToast = useUiStore((s) => s.addToast);
 
   const maxSec = useMemo(
@@ -19,8 +20,34 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
     [battle.song_length_seconds]
   );
 
-  if (existingSubmission) {
-    return <div className="rdb-panel p-5 font-mono text-rdb-orange">BEAT SUBMITTED</div>;
+  async function deleteSubmission() {
+    if (!existingSubmission) return;
+    setDeleting(true);
+    try {
+      await supabase.from('submissions').delete().eq('id', existingSubmission.id);
+      addToast('SUBMISSION DELETED');
+      onSubmitted?.();
+    } catch (err) {
+      addToast(err.message || 'DELETE FAILED', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  if (existingSubmission && !file) {
+    return (
+      <div className="rdb-panel mx-auto max-w-[700px] p-5 space-y-3">
+        <p className="font-mono text-rdb-orange text-center">BEAT SUBMITTED</p>
+        <button
+          className="rdb-button border-rdb-red text-rdb-red w-full"
+          type="button"
+          disabled={deleting}
+          onClick={deleteSubmission}
+        >
+          {deleting ? 'DELETING...' : 'DELETE & RE-UPLOAD'}
+        </button>
+      </div>
+    );
   }
 
   async function submit(event) {

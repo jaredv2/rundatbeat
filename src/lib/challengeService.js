@@ -20,25 +20,27 @@ function extractLoopId(sample) {
   return match ? match[1] : null;
 }
 
-export function buildSamplePayload(sample, restriction, instructions = '', restrictionsList = '') {
-  const loopId = extractLoopId(sample);
+export function buildSamplePayload(sample) {
+  const loopId = sample.id || extractLoopId(sample);
   return {
     id: loopId,
     title: sample.title,
+    full_title: sample.full_title || sample.title,
     bpm: sample.bpm,
-    key: sample.key,
-    genre: sample.genre,
+    key: sample.tonality || sample.key,
+    genre: sample.genre_tags?.[0]?.toLowerCase() || sample.genre || 'trap',
     duration: sample.duration,
     mp3_url: loopId ? getDownloadUrl(loopId) : sample.mp3_url,
-    waveform_url: sample.waveform_url,
-    waveform_img_url: sample.waveform_img_url,
-    detail_url: sample.detail_url,
-    uploader: sample.uploader,
-    tags: sample.tags || [],
-    description: sample.description || '',
-    restriction,
-    instructions,
-    restrictionsList,
+    cover_image: sample.cover_image || sample.thumb,
+    thumb: sample.thumb,
+    detail_url: sample.discogs_url || sample.detail_url,
+    uploader: sample.channel || sample.original_artist || sample.uploader,
+    tags: [...(sample.genre_tags || []), ...(sample.style_tags || [])],
+    youtube_url: sample.youtube_url || '',
+    youtube_video_id: sample.youtube_video_id || '',
+    original_artist: sample.original_artist || '',
+    label: sample.label || '',
+    year: sample.year || null,
   };
 }
 

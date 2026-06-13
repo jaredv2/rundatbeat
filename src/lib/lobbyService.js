@@ -235,8 +235,7 @@ export async function generateChallengeAsync(battleId, roomId, lobbyId) {
 
       const data = await buildChallenge(genre);
       const sample = data.sample || data;
-      const restriction = data.restriction || '';
-      const challengePayload = buildSamplePayload(sample, restriction);
+      const challengePayload = buildSamplePayload(sample);
 
       const { json: aiJson } = await generateBattlePrompt({
         genre: challengePayload.genre,

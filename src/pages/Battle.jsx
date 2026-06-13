@@ -130,13 +130,14 @@ export default function Battle() {
   const soloDifficulty = searchParams.get('difficulty') || 'medium';
 
   // useBattle is fully realtime — no polling anywhere below
-  const { battle, submissions, room, members, messages, loading, refresh, refreshRoomData, optimisticMessage, optimisticRemoveMessage } =
+  const { battle, submissions, room, members, messages, loading, refresh, refreshRoomData } =
     useBattle(id);
 
   const [ratings, setRatings]       = useState({});
   const [descriptions, setDescriptions] = useState({});
   const [paid, setPaid]             = useState(false);
   const [messageBody, setMessageBody] = useState('');
+  const QUICK_EMOJIS = ['🔥', '🎵', '💯', '🎤', '🏆'];
   const [isStarting, setIsStarting] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [leavingRoom, setLeavingRoom] = useState(false);
@@ -204,9 +205,6 @@ export default function Battle() {
   }, [profile?.id, id]);
 
   // ── Auto-scroll chat ──────────────────────────────────────────────────────
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
   // ── Leave cleanup on tab close (ranked rooms only — custom rooms auto-rejoin) ─
   useEffect(() => {
@@ -245,7 +243,7 @@ export default function Battle() {
       setLobbyTransitioning(false);
       return;
     }
-    const target = new Date(room.countdown_started_at).getTime() + 10000;
+    const target = new Date(room.countdown_started_at).getTime() + 5000;
     let raf;
     function tick() {
       const remaining = Math.max(0, Math.ceil((target - Date.now()) / 1000));
@@ -308,7 +306,7 @@ export default function Battle() {
       const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
       const data = await buildChallenge('trap');
       const sample = data.sample || data;
-      const payload = buildSamplePayload(sample, data.restriction || '');
+      const payload = buildSamplePayload(sample);
       payload.instructions = `Make a trap beat that matches the vibe of "${sample.title}".`;
       payload.restrictionsList = '';
       await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
@@ -439,15 +437,12 @@ export default function Battle() {
     const body = messageBody.trim();
     console.log('[Battle] SEND MESSAGE', { roomId: room.id, body: body.slice(0, 50) });
     setMessageBody('');
-    const tempId = `opt-${Date.now()}`;
-    optimisticMessage({ id: tempId, room_id: room.id, user_id: profile.id, body, created_at: new Date().toISOString(), profiles: { username: profile.username } });
     try {
       const { error } = await supabase
         .from('room_messages')
         .insert({ room_id: room.id, user_id: profile.id, body });
       if (error) throw error;
     } catch (err) {
-      optimisticRemoveMessage(tempId);
       addToast(err.message || 'MESSAGE FAILED', 'error');
     }
   }
@@ -524,6 +519,23 @@ export default function Battle() {
     console.log('[Battle] EXECUTE LEAVE', { roomId: room.id, battleId: battle?.id, deleteRoom, isRanked: room.mode === 'ranked' });
     try {
       const isRanked = room.mode === 'ranked';
+      const isOwner = room.owner_id === profile.id;
+
+      // Owner leaving a custom room — kick everyone, close, and remove room
+      if (isOwner && !isRanked) {
+        // Remove all members from room_members
+        await supabase.from('room_members').delete().eq('room_id', room.id);
+        // Close battle if it exists
+        if (battle?.id) {
+          await supabase.from('battles').update({ status: 'closed', early_closed: true }).eq('id', battle.id);
+        }
+        // Close and delete room
+        await supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
+        await supabase.from('rooms').delete().eq('id', room.id);
+        window.__clearReturnTo?.();
+        navigate('/', { replace: true });
+        return;
+      }
 
       // Signal to advanceToClosed that this is a forfeit (not auto-close)
       if (isRanked && battle?.id) {
@@ -663,7 +675,10 @@ export default function Battle() {
         )}
         {phase === 'active' && (
           <div className="rdb-panel p-5 text-center">
-            <p className="font-mono text-[11px] uppercase text-green-400">Session active</p>
+            <PhaseTimer
+              label="SESSION"
+              target={battle.voting_ends_at}
+            />
             <button
               className="rdb-button border-rdb-red text-rdb-red mt-4"
               type="button"
@@ -746,7 +761,7 @@ export default function Battle() {
         {countdown !== null && (
           <ChallengeReveal
             challenge={room?.challenge}
-            endsAt={room?.countdown_started_at ? new Date(new Date(room.countdown_started_at).getTime() + 10000).toISOString() : null}
+            endsAt={room?.countdown_started_at ? new Date(new Date(room.countdown_started_at).getTime() + 5000).toISOString() : null}
             hideChallenge
           />
         )}
@@ -848,9 +863,10 @@ export default function Battle() {
 
           {/* ── Phase countdown timers ── */}
           {phase === 'upcoming' && isSolo && (
-            <div className="rdb-panel p-3 font-mono text-[11px] uppercase text-rdb-muted">
-              PRACTICE MODE — NO TIMER. START WHEN READY.
-            </div>
+            <PhaseTimer
+              label="SESSION STARTS"
+              target={battle.starts_at}
+            />
           )}
           {phase === 'active' && (
             <PhaseTimer
@@ -1152,25 +1168,43 @@ export default function Battle() {
               )}
               <div ref={chatEndRef} />
             </div>
-            <div className="mt-3 flex gap-2">
-              <input
-                className="rdb-input"
-                disabled={!room}
-                placeholder="ROOM MESSAGE"
-                value={messageBody}
-                onChange={(e) => setMessageBody(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') sendRoomMessage();
-                }}
-              />
-              <button
-                className="rdb-button rdb-button-primary"
-                disabled={!room}
-                type="button"
-                onClick={sendRoomMessage}
-              >
-                SEND
-              </button>
+            <div className="mt-3">
+              <div className="flex gap-2">
+                <input
+                  className="rdb-input"
+                  disabled={!room}
+                  placeholder="ROOM MESSAGE"
+                  value={messageBody}
+                  onChange={(e) => setMessageBody(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') sendRoomMessage();
+                  }}
+                />
+                <button
+                  className="rdb-button rdb-button-primary"
+                  disabled={!room}
+                  type="button"
+                  onClick={sendRoomMessage}
+                >
+                  SEND
+                </button>
+              </div>
+              <div className="flex gap-2 mt-2">
+                {QUICK_EMOJIS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    className="rounded border border-rdb-border bg-rdb-bg/50 hover:border-rdb-orange hover:bg-rdb-orange/10 px-3 py-1.5 text-lg leading-none cursor-pointer transition"
+                    type="button"
+                    disabled={!room}
+                    onClick={async () => {
+                      if (!profile || !room) return;
+                      await supabase.from('room_messages').insert({ room_id: room.id, user_id: profile.id, body: emoji });
+                    }}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
             </div>
           </section>
         </aside>

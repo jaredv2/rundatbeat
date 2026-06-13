@@ -27,6 +27,10 @@ export function pickFromPool() {
   return RESTRICTION_POOL[Math.floor(Math.random() * RESTRICTION_POOL.length)];
 }
 
+export function getSoloDurationMinutes(difficulty) {
+  return SOLO_DIFFICULTY[difficulty]?.durationMinutes || SOLO_DIFFICULTY.medium.durationMinutes;
+}
+
 export function difficultyFromTier(tier) {
   const order = ['bronze', 'silver', 'gold', 'platinum', 'diamond', 'elite', 'champion', 'goat'];
   const idx = order.indexOf(tier?.toLowerCase() || 'bronze');
@@ -59,22 +63,27 @@ function keyHints(key) {
 const SOLO_DIFFICULTY = {
   easy: {
     label: 'easy',
+    durationMinutes: 45,
     instructionStyle: 'simple creative direction — pick one vibe or mood for the beat.',
   },
   medium: {
     label: 'medium',
+    durationMinutes: 30,
     instructionStyle: 'clear creative direction — combine the loop\'s mood with a specific energy or context.',
   },
   hard: {
     label: 'hard',
+    durationMinutes: 20,
     instructionStyle: 'detailed creative direction — reference the loop\'s specific character and push the producer\'s skill.',
   },
   expert: {
     label: 'expert',
+    durationMinutes: 15,
     instructionStyle: 'demanding creative direction — require structural or arrangement-level thinking, not just sound selection.',
   },
   impossible: {
     label: 'impossible',
+    durationMinutes: 10,
     instructionStyle: 'extreme creative direction — require multiple simultaneous constraints and creative problem-solving.',
   },
 };

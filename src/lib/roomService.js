@@ -144,8 +144,7 @@ export async function generateCustomRoomChallenge(roomId) {
 
   const data = await buildChallenge('trap');
   const sample = data.sample || data;
-  const restriction = data.restriction || '';
-  const challengePayload = buildSamplePayload(sample, restriction);
+  const challengePayload = buildSamplePayload(sample);
 
   const { json: aiJson } = await generateBattlePrompt({
     genre: challengePayload.genre,
@@ -197,8 +196,7 @@ export async function generateSoloChallenge(roomId, difficulty = 'medium') {
 
   const data = await buildChallenge('trap');
   const sample = data.sample || data;
-  const restriction = data.restriction || '';
-  const challengePayload = buildSamplePayload(sample, restriction);
+  const challengePayload = buildSamplePayload(sample);
 
   const { json: aiJson } = await generateBattlePrompt({
     genre: challengePayload.genre,

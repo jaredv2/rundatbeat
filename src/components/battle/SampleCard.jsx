@@ -1,14 +1,22 @@
-import { Download, ExternalLink, Music } from 'lucide-react';
-import WaveformPlayer from '../audio/WaveformPlayer';
-import { getDownloadUrl } from '../../lib/challengeService';
-import { useAuthStore } from '../../store/authStore';
+import { ClipboardCopy, ExternalLink, Music } from 'lucide-react';
+import { useMemo, useState } from 'react';
+
+const BEAT_GENRES = ['TRAP', 'HIPHOP', 'RAGE', 'TDF', 'JERSEY CLUB', 'DRILL', 'HOODTRAP'];
 
 export default function SampleCard({ challenge, phase, room }) {
-  const { profile } = useAuthStore();
+  const [copied, setCopied] = useState(false);
+  const instructionGenre = useMemo(() => BEAT_GENRES[Math.floor(Math.random() * BEAT_GENRES.length)], []);
   if (!challenge) return null;
 
   const isVoting = phase === 'voting';
   const allowRestrictions = room?.challenge?.allowRestrictions !== false;
+
+  const handleCopyLink = async () => {
+    if (!challenge.youtube_url) return;
+    await navigator.clipboard.writeText(challenge.youtube_url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div className="rdb-panel p-5">
@@ -41,37 +49,42 @@ export default function SampleCard({ challenge, phase, room }) {
         </p>
       )}
 
-      {!isVoting && challenge.tags?.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {challenge.tags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded border border-rdb-border bg-rdb-bg/50 px-2 py-0.5 font-mono text-[10px] uppercase text-rdb-muted"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {challenge.mp3_url && (
+      {challenge.youtube_video_id ? (
         <div className="mt-4">
           <p className="mb-1 font-mono text-[10px] uppercase text-rdb-muted">
             {isVoting ? 'CURRENT SAMPLE' : 'PREVIEW'}
           </p>
-          <WaveformPlayer url={challenge.mp3_url} profile={profile} />
+          <div className="relative w-full overflow-hidden rounded-lg border border-rdb-border" style={{ paddingBottom: '56.25%' }}>
+            <iframe
+              src={`https://www.youtube.com/embed/${challenge.youtube_video_id}?rel=0`}
+              title={challenge.title}
+              className="absolute inset-0 h-full w-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      ) : (challenge.cover_image || challenge.thumb) && (
+        <div className="mt-4">
+          <p className="mb-1 font-mono text-[10px] uppercase text-rdb-muted">
+            {isVoting ? 'CURRENT SAMPLE' : 'PREVIEW'}
+          </p>
+          <img
+            src={challenge.cover_image || challenge.thumb}
+            alt={challenge.title}
+            className="w-full rounded-lg border border-rdb-border object-cover"
+          />
         </div>
       )}
 
       <div className="mt-4 flex flex-wrap gap-3">
-        {challenge.id && (
-          <a
+        {challenge.youtube_url && (
+          <button
             className="rdb-button flex items-center gap-2"
-            href={getDownloadUrl(challenge.id)}
-            download
+            onClick={handleCopyLink}
           >
-            <Download size={14} /> DOWNLOAD
-          </a>
+            <ClipboardCopy size={14} /> {copied ? 'COPIED!' : 'COPY LINK'}
+          </button>
         )}
         {challenge.detail_url && (
           <a
@@ -84,12 +97,13 @@ export default function SampleCard({ challenge, phase, room }) {
           </a>
         )}
       </div>
-      <p className="mt-2 font-mono text-[9px] uppercase text-rdb-muted">
-        Powered by{' '}
-        <a href="https://loopazon.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-rdb-orange">
-          loopazon.com
-        </a>
-      </p>
+
+      <div className="mt-3 rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-3">
+        <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>
+        <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed">
+          MAKE A {instructionGenre} BEAT FROM THIS SAMPLE
+        </p>
+      </div>
 
       {allowRestrictions && challenge.restrictionsList && (
         <div className="mt-4">
@@ -97,13 +111,6 @@ export default function SampleCard({ challenge, phase, room }) {
           <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-4">
             {challenge.restrictionsList}
           </p>
-        </div>
-      )}
-
-      {allowRestrictions && challenge.restriction && !challenge.restrictionsList && (
-        <div className="mt-4 rounded-lg border border-rdb-orange/40 bg-rdb-orange/10 p-4">
-          <p className="font-mono text-[10px] uppercase text-rdb-orange">RESTRICTION</p>
-          <p className="mt-1 font-mono text-sm uppercase text-rdb-text">{challenge.restriction}</p>
         </div>
       )}
     </div>

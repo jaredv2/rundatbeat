@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, BadgeCheck, Calendar, Edit3, Save, Settings, Shirt, Trophy } from 'lucide-react';
-import WaveformPlayer from '../components/audio/WaveformPlayer';
 import AddFriendButton from '../components/social/AddFriendButton';
 import ReportButton from '../components/social/ReportButton';
 import RankBadge from '../components/ui/RankBadge';
@@ -17,7 +16,6 @@ export default function Profile() {
   const { profile: viewer, refreshProfile } = useAuthStore();
   const addToast = useUiStore((s) => s.addToast);
   const [profile, setProfile] = useState(null);
-  const [submissions, setSubmissions] = useState([]);
   const [editing, setEditing] = useState(false);
   const [description, setDescription] = useState('');
   const customBadge = useMemo(() => (
@@ -31,10 +29,6 @@ export default function Profile() {
       const { data: user } = await supabase.from('profiles').select('*, user_shop_purchases(metadata, shop_items(item_type))').eq('username', username).maybeSingle();
       setProfile(user);
       setDescription(user?.description || '');
-      if (user) {
-        const { data: subs } = await supabase.from('submissions').select('*, battles(title, status, genre)').eq('user_id', user.id).order('submitted_at', { ascending: false });
-        setSubmissions(subs || []);
-      }
     }
     load();
   }, [username]);
@@ -123,67 +117,6 @@ export default function Profile() {
         ) : (
           <p className="font-mono text-[12px] text-rdb-muted">{profile.description || 'No description yet. Click Edit to add one.'}</p>
         )}
-      </section>
-
-      <section className="relative z-10 mx-auto max-w-[860px]">
-        <h2 className="rdb-section-title">SUBMISSIONS</h2>
-        <div className="mt-2 flex flex-col gap-3">
-          {submissions.length === 0 && (
-            <p className="border-t border-rdb-border pt-4 font-mono text-[12px] uppercase text-rdb-muted">
-              NO SUBMISSIONS YET.
-            </p>
-          )}
-          {submissions.map((submission) => {
-            // Debug: log each submission card render
-            console.log('[Profile] Rendering submission card:', submission.id, submission.battles?.title);
-            const submissionDate = submission.submitted_at
-              ? new Date(submission.submitted_at).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
-              : '—';
-            const battleMode = (submission.battles?.mode || submission.battles?.genre || 'QUICK').toUpperCase();
-            const battleGenre = (submission.battles?.genre || '').toUpperCase();
-            return (
-              <div
-                key={submission.id}
-                className="rdb-panel bg-rdb-surface p-4"
-                style={{ borderColor: 'var(--profile-accent, var(--color-rdb-border))' }}
-              >
-                {/* Top row: title + mode tags on left, votes on right */}
-                <div className="mb-3 flex items-start justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm font-bold uppercase text-rdb-text">
-                      {submission.battles?.title || '—'}
-                    </span>
-                    <span className="border border-rdb-border px-2 py-0.5 font-mono text-[10px] uppercase text-rdb-muted">
-                      {battleMode}
-                    </span>
-                    {battleGenre && battleGenre !== battleMode && (
-                      <span className="border border-rdb-border px-2 py-0.5 font-mono text-[10px] uppercase text-rdb-muted">
-                        {battleGenre}
-                      </span>
-                    )}
-                  </div>
-                  {/* Votes — orange number + label, matching Image 1 */}
-                  <div className="shrink-0 text-right">
-                    <div className="font-mono text-lg font-bold text-rdb-orange leading-none">
-                      {formatNumber(submission.vote_count ?? 0)}
-                    </div>
-                    <div className="font-mono text-[10px] uppercase text-rdb-muted">VOTES</div>
-                  </div>
-                </div>
-
-                {/* Middle row: PLAY button + waveform */}
-                <div className="flex items-center gap-3">
-                  <WaveformPlayer url={submission.audio_url} profile={profile} />
-                </div>
-
-                {/* Bottom row: date aligned right */}
-                <div className="mt-2 text-right font-mono text-[10px] text-rdb-muted">
-                  {submissionDate}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </section>
     </main>
   );

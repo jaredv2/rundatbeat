@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Music, Timer, Users, Wand2, X } from 'lucide-react';
-import { difficultyFromTier } from '../../lib/groq';
+import { difficultyFromTier, getSoloDurationMinutes } from '../../lib/groq';
 import { createRoom, deleteRoom } from '../../lib/roomService';
 import { enterQueue as enterLobbyQueue } from '../../lib/lobbyService';
 import { playUiSound } from '../../lib/sfx';
@@ -16,7 +16,6 @@ const DEFAULT_ROOM_SETUP = {
   votingMinutes: 3,
   maxPlayers: 4,
   soloDifficulty: 'medium',
-  allowInstructions: true,
   allowRestrictions: true,
 };
 
@@ -99,7 +98,6 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
         songLengthSeconds: setup.songLengthSeconds,
         votingMinutes: setup.votingMinutes,
         name: roomSetup.name,
-        allowInstructions: roomSetup.allowInstructions,
         allowRestrictions: roomSetup.allowRestrictions,
       });
       addToast('ROOM CREATED');
@@ -117,6 +115,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
     setStatus('busy');
 
     try {
+      const durationMin = getSoloDurationMinutes(roomSetup.soloDifficulty);
       const { data: battle, error: battleError } = await supabase.from('battles').insert({
         title: 'SOLO SESSION',
         prompt_text: '',
@@ -125,12 +124,12 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
         restrictions: '',
         reference_artists: [],
         flavor_text: '',
-        duration_minutes: 35,
+        duration_minutes: durationMin,
         song_length_seconds: 60,
         mode: 'solo',
         status: 'upcoming',
-        starts_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-        voting_ends_at: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
+        starts_at: new Date(Date.now() + 30 * 1000).toISOString(),
+        voting_ends_at: new Date(Date.now() + durationMin * 60 * 1000).toISOString(),
         created_by: profile.id,
       }).select('id').single();
       if (battleError) throw battleError;
@@ -204,20 +203,26 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                   { value: 'hard', icon: '⚔️', label: 'Hard', desc: 'Demanding instructions, tight restrictions' },
                   { value: 'expert', icon: '💀', label: 'Expert', desc: 'Complex technical demands, strict rules' },
                   { value: 'impossible', icon: '👹', label: 'Impossible', desc: 'Chaotic restrictions, extreme constraints' },
-                ].map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${roomSetup.soloDifficulty === opt.value ? 'border-rdb-orange bg-rdb-orange/10' : 'border-rdb-border bg-rdb-bg/50 hover:border-rdb-orange/50'}`}
-                    onClick={() => { playUiSound('click'); updateRoomSetup('soloDifficulty', opt.value); }}
-                  >
-                    <span className="text-xl leading-none">{opt.icon}</span>
-                    <div>
-                      <div className="font-mono text-[12px] font-bold uppercase text-rdb-text">{opt.label}</div>
-                      <div className="mt-0.5 font-mono text-[10px] uppercase text-rdb-text/50">{opt.desc}</div>
-                    </div>
-                  </button>
-                ))}
+                ].map((opt) => {
+                  const mins = getSoloDurationMinutes(opt.value);
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`flex items-start gap-3 rounded-lg border p-3 text-left transition ${roomSetup.soloDifficulty === opt.value ? 'border-rdb-orange bg-rdb-orange/10' : 'border-rdb-border bg-rdb-bg/50 hover:border-rdb-orange/50'}`}
+                      onClick={() => { playUiSound('click'); updateRoomSetup('soloDifficulty', opt.value); }}
+                    >
+                      <span className="text-xl leading-none">{opt.icon}</span>
+                      <div className="flex-1">
+                        <div className="font-mono text-[12px] font-bold uppercase text-rdb-text">{opt.label}</div>
+                        <div className="mt-0.5 font-mono text-[10px] uppercase text-rdb-text/50">{opt.desc}</div>
+                      </div>
+                      <span className="flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-muted">
+                        <Timer size={10} />{mins}min
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <div className="grid gap-2 self-stretch">
@@ -326,15 +331,6 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                   </div>
                 </div>
                 <div className="flex gap-4 mt-1">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={roomSetup.allowInstructions}
-                      onChange={(e) => updateRoomSetup('allowInstructions', e.target.checked)}
-                      className="accent-rdb-orange"
-                    />
-                    <span className="font-mono text-[10px] uppercase text-rdb-text/50">Allow Instructions</span>
-                  </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"

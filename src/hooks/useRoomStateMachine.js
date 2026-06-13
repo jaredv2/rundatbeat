@@ -5,7 +5,7 @@ import { advanceLobbyToActive } from '../lib/roomService';
 import { pushNotificationToMany } from '../lib/pushNotification';
 
 const DEFAULT_VOTING_MINUTES = 3;
-const LOBBY_COUNTDOWN_MS = 10000;
+const LOBBY_COUNTDOWN_MS = 5000;
 const TICK_INTERVAL_MS = 3000;
 const _closingGuards = new Map();
 

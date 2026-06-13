@@ -117,7 +117,7 @@ export default function Lobby() {
 
   // ── Countdown timer (always uses DB timestamp) ──────────────────────────────
   useEffect(() => {
-    const target = lobby?.countdown_started_at ? new Date(lobby.countdown_started_at).getTime() + 10000 : null;
+    const target = lobby?.countdown_started_at ? new Date(lobby.countdown_started_at).getTime() + 5000 : null;
     if (!target) { setCountdown(null); return; }
     let raf;
     function tick() {
@@ -135,7 +135,7 @@ export default function Lobby() {
     if (!lobby?.countdown_started_at) return;
     if (advancing.current) return;
 
-    const target = new Date(lobby.countdown_started_at).getTime() + 10000;
+    const target = new Date(lobby.countdown_started_at).getTime() + 5000;
     const delay = Math.max(0, target - Date.now());
     if (delay > 0) {
       const timer = setTimeout(() => {
@@ -301,7 +301,7 @@ export default function Lobby() {
         {countdownActive && !isMatching && (
           <ChallengeReveal
             challenge={lobby.challenge}
-            endsAt={lobby.countdown_started_at ? new Date(new Date(lobby.countdown_started_at).getTime() + 10000).toISOString() : null}
+            endsAt={lobby.countdown_started_at ? new Date(new Date(lobby.countdown_started_at).getTime() + 5000).toISOString() : null}
             hideChallenge
           />
         )}
