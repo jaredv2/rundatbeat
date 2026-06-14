@@ -1,7 +1,7 @@
 import { ClipboardCopy, ExternalLink, Music } from 'lucide-react';
 import { useState } from 'react';
 
-export default function SampleCard({ challenge, phase, room }) {
+export default function SampleCard({ challenge, phase, room, hideDetails }) {
   const [copied, setCopied] = useState(false);
   if (!challenge) return null;
 
@@ -91,20 +91,24 @@ export default function SampleCard({ challenge, phase, room }) {
         )}
       </div>
 
-      <div className="mt-3 rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-3">
-        <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>
-        <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed">
-          MAKE A {challenge.instructionGenre || 'TRAP'} BEAT FROM THIS SAMPLE
-        </p>
-      </div>
+      {!hideDetails && (
+        <>
+          <div className="mt-3 rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-3">
+            <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>
+            <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed">
+              MAKE A {challenge.instructionGenre || 'TRAP'} BEAT FROM THIS SAMPLE
+            </p>
+          </div>
 
-      {allowRestrictions && challenge.restrictionsList && (
-        <div className="mt-4">
-          <p className="font-mono text-[10px] uppercase text-rdb-red mb-1">RESTRICTIONS</p>
-          <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-4">
-            {challenge.restrictionsList}
-          </p>
-        </div>
+          {allowRestrictions && challenge.restrictionsList && (
+            <div className="mt-4">
+              <p className="font-mono text-[10px] uppercase text-rdb-red mb-1">RESTRICTIONS</p>
+              <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-4">
+                {challenge.restrictionsList}
+              </p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

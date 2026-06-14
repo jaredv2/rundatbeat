@@ -64,6 +64,51 @@ function PhaseTimer({ label, target, urgent: forcedUrgent }) {
   );
 }
 
+function SoloTimer({ target }) {
+  const { label: countdown, remaining } = useCountdown(target);
+  if (!target) return null;
+  const urgent = remaining < 5 * 60 * 1000;
+  const mins = Math.floor(remaining / 60000);
+  const secs = Math.floor((remaining % 60000) / 1000);
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <span className="font-mono text-xs uppercase text-rdb-muted">
+        {urgent ? '⚠ ENDING SOON' : 'ENDS IN'}
+      </span>
+      <span
+        className={`font-mono text-5xl font-bold tracking-widest ${
+          urgent ? 'text-red-400' : 'text-rdb-orange'
+        }`}
+      >
+        {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
+      </span>
+    </div>
+  );
+}
+
+function SoloInstructionsCard({ challenge }) {
+  if (!challenge) return null;
+  const allowRestrictions = challenge.allowRestrictions !== false;
+  return (
+    <div className="rdb-panel p-4 space-y-3">
+      <div className="rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-3">
+        <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>
+        <p className="font-mono text-xs uppercase text-rdb-text leading-relaxed">
+          MAKE A {challenge.instructionGenre || 'TRAP'} BEAT FROM THIS SAMPLE
+        </p>
+      </div>
+      {allowRestrictions && challenge.restrictionsList && (
+        <div className="rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-3">
+          <p className="font-mono text-[10px] uppercase text-rdb-red mb-1">RESTRICTIONS</p>
+          <p className="font-mono text-xs uppercase text-rdb-text leading-relaxed">
+            {challenge.restrictionsList}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SongLengthBadge({ seconds }) {
   if (!seconds) return null;
   if (seconds >= 10000) {
@@ -640,8 +685,8 @@ export default function Battle() {
   }[phase] || phase?.toUpperCase();
 
   return isSolo ? (
-    <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center py-12">
-      <div className="mx-auto w-full max-w-2xl space-y-5">
+    <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center py-6">
+      <div className="mx-auto w-full max-w-4xl space-y-3">
         {phase === 'upcoming' ? (
           room?.challenge ? (
             <SampleCard challenge={room.challenge} phase={phase} room={room} />
@@ -654,11 +699,11 @@ export default function Battle() {
             </div>
           )
         ) : phase === 'closed' ? (
-          <div className="rdb-panel p-8 text-center space-y-4">
-            <div className="font-mono text-lg font-bold uppercase text-rdb-orange">SESSION ENDED</div>
+          <div className="rdb-panel flex flex-col items-center gap-4 p-8 text-center">
+            <div className="font-mono text-xl font-bold uppercase text-rdb-orange">SESSION ENDED</div>
             <p className="font-mono text-[11px] uppercase text-rdb-muted">Great run. Time to head back.</p>
             <button
-              className="rdb-button rdb-button-primary"
+              className="rdb-button rdb-button-primary w-48"
               type="button"
               onClick={() => navigate('/')}
             >
@@ -666,31 +711,37 @@ export default function Battle() {
             </button>
           </div>
         ) : room?.challenge && phase === 'active' ? (
-          <>
-            <SampleCard challenge={room.challenge} phase={phase} room={room} />
-            <PhaseTimer
-              label="SESSION"
-              target={battle.voting_ends_at || battle.ends_at}
-            />
-          </>
+          <div className="grid gap-3 md:grid-cols-[1fr_320px]">
+            {/* ── Left: Sample card ── */}
+            <SampleCard challenge={room.challenge} phase={phase} room={room} hideDetails />
+
+            {/* ── Right: Timer + instructions ── */}
+            <div className="flex flex-col gap-3">
+              <div className="rdb-panel flex flex-col items-center justify-center gap-5 p-6 text-center">
+                <SoloTimer target={battle.voting_ends_at || battle.ends_at} />
+                <button
+                  className="rdb-button border-rdb-red text-rdb-red w-full"
+                  type="button"
+                  disabled={leavingRoom}
+                  onClick={leaveRoom}
+                >
+                  {leavingRoom ? 'LEAVING...' : 'LEAVE'}
+                </button>
+              </div>
+              <SoloInstructionsCard challenge={room.challenge} />
+            </div>
+          </div>
+        ) : phase === 'active' ? (
+          <div className="rdb-panel p-8 text-center">
+            <Spinner label="GENERATING CHALLENGE" />
+            <p className="mt-3 font-mono text-[10px] uppercase text-rdb-muted">
+              Preparing your session...
+            </p>
+          </div>
         ) : phase === 'voting' ? (
           <></>
         ) : (
           <BattlePrompt battle={battle} />
-        )}
-
-        {/* ── Leave button ── */}
-        {phase !== 'closed' && (
-          <div className="text-center">
-            <button
-              className="rdb-button border-rdb-red text-rdb-red"
-              type="button"
-              disabled={leavingRoom}
-              onClick={leaveRoom}
-            >
-              {leavingRoom ? 'LEAVING...' : 'LEAVE'}
-            </button>
-          </div>
         )}
       </div>
     </main>
