@@ -396,8 +396,6 @@ export default function Battle() {
 
         if (showWin) {
           devLog('[Battle] XP MODAL', { rank: myRank || 1, hasSubmitted });
-          playUiSound('win');
-          setShowRankUpModal(true);
 
           async function fetchXpWithRetry(attempts = 0) {
             const { data } = await supabase.from('profiles').select('xp, level').eq('id', profile.id).maybeSingle();
@@ -414,6 +412,8 @@ export default function Battle() {
             setRankUpNewXp(newXpVal);
             setRankUpOldLevel(oldLevel);
             setRankUpNewLevel(newLevel);
+            playUiSound('win');
+            setShowRankUpModal(true);
             refreshProfile();
           }
           fetchXpWithRetry();
@@ -937,7 +937,7 @@ export default function Battle() {
 
           {phase === 'closed' && !isSolo && (
             submissions.length > 0 ? (
-              <BattleResults submissions={submissions} />
+              <BattleResults submissions={submissions} currentUserId={profile?.id} />
             ) : (
               <div className="rdb-panel p-8 text-center space-y-4">
                 <p className="font-mono text-sm uppercase text-rdb-muted">This battle has ended.</p>

@@ -16,7 +16,7 @@ function loadWaveSurfer() {
   return wavesurferPromise;
 }
 
-function WaveformPlayerInner({ url, profile }) {
+function WaveformPlayerInner({ url, profile, rankColor }) {
   const containerRef = useRef(null);
   const waveRef = useRef(null);
   const destroyedRef = useRef(false);
@@ -26,8 +26,8 @@ function WaveformPlayerInner({ url, profile }) {
   const [loaded, setLoaded] = useState(false);
 
   const theme = getThemeStyle(profile);
-  const waveColor = theme.accent;
-  const progressColor = profile?.active_theme ? `${theme.accent}99` : '#22d3ee';
+  const waveColor = rankColor || theme.accent;
+  const progressColor = rankColor ? `${rankColor}cc` : (profile?.active_theme ? `${theme.accent}99` : '#22d3ee');
 
   useEffect(() => {
     if (!containerRef.current || !url) return undefined;
@@ -145,7 +145,7 @@ function WaveformPlayerInner({ url, profile }) {
 }
 
 const WaveformPlayer = memo(WaveformPlayerInner, (prev, next) => {
-  return prev.url === next.url && prev.profile?.active_theme === next.profile?.active_theme && prev.profile?.accent_color === next.profile?.accent_color;
+  return prev.url === next.url && prev.rankColor === next.rankColor && prev.profile?.active_theme === next.profile?.active_theme && prev.profile?.accent_color === next.profile?.accent_color;
 });
 
 export default WaveformPlayer;
