@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { devLog } from '../lib/devLog';
 
 /**
  * useRoomEvents — subscribe to room_events for a given room.
@@ -40,7 +41,7 @@ export function useRoomEvents(roomId, { onEvent, onKick, onCloseRoom, onChalleng
 
           if (event.event_type === 'player_leave' && event.sender_id !== profileId) {
             // Another player left — just log, don't redirect self
-            console.log('[RoomEvent] player left:', event.sender_id);
+            devLog('[RoomEvent] player left:', event.sender_id);
           }
 
           if (event.event_type === 'owner_leave') {

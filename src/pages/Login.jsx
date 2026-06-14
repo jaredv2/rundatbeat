@@ -1,10 +1,11 @@
 import { supabase } from '../lib/supabase';
+import { devLog, devError } from '../lib/devLog';
 
 export default function Login() {
   async function login() {
     // DEBUG: log the redirect URL so you can verify it in the console
     const redirectTo = `${window.location.origin}/auth/callback`;
-    console.log('[Login] OAuth redirectTo:', redirectTo);
+    devLog('[Login] OAuth redirectTo:', redirectTo);
 
     const { error } = await supabase?.auth.signInWithOAuth({
       provider: 'discord',
@@ -15,7 +16,7 @@ export default function Login() {
     });
 
     if (error) {
-      console.error('[Login] OAuth error:', error.message);
+      devError('[Login] OAuth error:', error.message);
     }
   }
 

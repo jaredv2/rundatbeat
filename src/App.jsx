@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Footer from './components/layout/Footer';
 import Navbar from './components/layout/Navbar';
 import FriendsDock from './components/social/FriendsDock';
+import { devError } from './lib/devLog';
 
 import ToastNotification from './components/ui/ToastNotification';
 import Spinner from './components/ui/Spinner';
@@ -142,7 +143,7 @@ export default function App() {
           setProfile(null);
         }
       } catch (err) {
-        console.error('[App] hydrate error:', err);
+        devError('[App] hydrate error:', err);
       } finally {
         setAuthReady(true);
       }

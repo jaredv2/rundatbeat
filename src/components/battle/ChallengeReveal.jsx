@@ -3,6 +3,7 @@ import { Music } from 'lucide-react';
 import { playUiSound } from '../../lib/sfx';
 import { generateChallengeAsync } from '../../lib/lobbyService';
 import { generateSoloChallenge } from '../../lib/roomService';
+import { devError } from '../../lib/devLog';
 import { supabase } from '../../lib/supabase';
 
 function useCountdownFrom(endsAt) {
@@ -51,7 +52,7 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
     if (roomMode === 'solo') {
       // Solo — fetch sample + generate AI with difficulty
       generateSoloChallenge(roomId, difficulty)
-        .catch((err) => console.error('[ChallengeReveal] AI FAILED:', err));
+        .catch((err) => devError('[ChallengeReveal] AI FAILED:', err));
     } else if (roomMode !== 'room') {
       // Ranked — find lobby and use lobbyService
       // (room mode is generated once in advanceLobbyToActive)
@@ -63,7 +64,7 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
           .maybeSingle();
         if (lobby?.id) {
           generateChallengeAsync(battleId, roomId, lobby.id)
-            .catch((err) => console.error('[ChallengeReveal] AI FAILED:', err));
+            .catch((err) => devError('[ChallengeReveal] AI FAILED:', err));
         }
       })();
     }

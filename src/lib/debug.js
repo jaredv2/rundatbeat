@@ -10,6 +10,9 @@ import { createRoom } from './roomService';
 import { getChallengeSample } from './challengeService';
 import { computeNewElos, tierFromElo, runEloTests } from './elo';
 
+(() => {
+if (!import.meta.env.DEV) return;
+
 function uid() { return useAuthStore.getState().profile?.id; }
 function label(icon, text) { return `%c${icon} ${text}`; }
 const HL = 'color:#f97316;font-weight:bold';
@@ -868,3 +871,4 @@ if (typeof window !== 'undefined') {
   console.log('%c🔧 RUNDATBEAT Debug Console Loaded', 'color:#f97316;font-size:14px;font-weight:bold');
   console.log('%cType db.* for all commands, or use shorthand (whoami, health, etc.)', 'color:#6b7280;font-style:italic');
 }
+})();

@@ -8,6 +8,7 @@ import TokenBadge from '../components/tokens/TokenBadge';
 import { NAMEPLATE_ICONS } from '../lib/display';
 import { useShop } from '../hooks/useShop';
 import { supabase } from '../lib/supabase';
+import { devLog, devError } from '../lib/devLog';
 import { useAuthStore } from '../store/authStore';
 import { useTokenStore } from '../store/tokenStore';
 import { useUiStore } from '../store/uiStore';
@@ -38,14 +39,14 @@ export default function Shop() {
 
   async function load() {
     if (!user || !supabase) return;
-    console.log('[Shop] Loading shop data for user:', user.id);
+    devLog('[Shop] Loading shop data for user:', user.id);
     const [itemRows, purchaseRows, queueRows, battleRows] = await Promise.all([
       supabase.from('shop_items').select('*').eq('is_active', true).order('cost_tokens'),
       supabase.from('user_shop_purchases').select('*, shop_items(name, cost_tokens, item_type)').eq('user_id', user.id).order('purchased_at', { ascending: false }),
       supabase.from('shop_review_queue').select('*').eq('user_id', user.id).order('purchased_at', { ascending: false }),
       supabase.from('battles').select('id, title').eq('status', 'closed').order('created_at', { ascending: false }),
     ]);
-    console.log('[Shop] Loaded items:', itemRows.data?.length, 'purchases:', purchaseRows.data?.length);
+    devLog('[Shop] Loaded items:', itemRows.data?.length, 'purchases:', purchaseRows.data?.length);
     setItems((itemRows.data || []).filter((item) => item.item_type !== 'extra_submission_slot'));
     setPurchases(purchaseRows.data || []);
     setReviewRows(queueRows.data || []);
@@ -68,13 +69,13 @@ export default function Shop() {
   // Called when user clicks BUY on a shop card
   function handleBuyClick(item) {
     if (profile.tokens < item.cost_tokens) {
-      console.log('[Shop] Insufficient tokens for item:', item.name, '— needed:', item.cost_tokens, '— have:', profile.tokens);
+      devLog('[Shop] Insufficient tokens for item:', item.name, '— needed:', item.cost_tokens, '— have:', profile.tokens);
       setInsufficient(true);
       return;
     }
     if (NEEDS_INLINE_PICKER.includes(item.item_type)) {
       // Show the inline picker first, then proceed to PurchaseModal
-      console.log('[Shop] Opening inline picker for item_type:', item.item_type);
+      devLog('[Shop] Opening inline picker for item_type:', item.item_type);
       setPickerItem(item);
       setPickerIcon(null);
       setPickerBadge('');
@@ -97,7 +98,7 @@ export default function Shop() {
       return;
     }
 
-    console.log('[Shop] Picker confirmed — type:', type, 'icon:', pickerIcon, 'badge:', pickerBadge);
+    devLog('[Shop] Picker confirmed — type:', type, 'icon:', pickerIcon, 'badge:', pickerBadge);
 
     // Build the metadata that will be passed through PurchaseModal → confirm()
     const prefilledMetadata =
@@ -117,7 +118,7 @@ export default function Shop() {
         ? { ...selected._prefilledMetadata, ...metadata }
         : metadata;
 
-      console.log('[Shop] Confirming purchase — item:', selected?.name, 'metadata:', finalMetadata);
+      devLog('[Shop] Confirming purchase — item:', selected?.name, 'metadata:', finalMetadata);
       const result = await buy({ user, profile, item: selected, metadata: finalMetadata });
       setInlineMessage(result.reviewed ? 'SUBMITTED FOR REVIEW - USUALLY APPROVED WITHIN 24H' : '');
       addToast(result.reviewed ? 'SUBMITTED FOR REVIEW' : 'PURCHASE COMPLETE');
@@ -125,7 +126,7 @@ export default function Shop() {
       await load();
       setSelected(null);
     } catch (error) {
-      console.error('[Shop] Purchase error:', error);
+      devError('[Shop] Purchase error:', error);
       addToast(error.message, 'error');
     }
   }
@@ -178,7 +179,7 @@ export default function Shop() {
               className="rdb-button"
               type="button"
               onClick={() => {
-                console.log('[Shop] Picker cancelled');
+                devLog('[Shop] Picker cancelled');
                 setPickerItem(null);
               }}
             >
@@ -194,7 +195,7 @@ export default function Shop() {
               </p>
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
                 {nameplateIconEntries.map(([key, emoji]) => {
-                  console.log('[Shop] Rendering nameplate icon option:', key, emoji);
+                  devLog('[Shop] Rendering nameplate icon option:', key, emoji);
                   return (
                     <button
                       key={key}
@@ -206,7 +207,7 @@ export default function Shop() {
                           : 'border-rdb-border text-rdb-muted hover:border-rdb-orange/50'
                       }`}
                       onClick={() => {
-                        console.log('[Shop] Icon selected:', key);
+                        devLog('[Shop] Icon selected:', key);
                         setPickerIcon(key);
                       }}
                     >
@@ -244,7 +245,7 @@ export default function Shop() {
                   placeholder="E.G. BEAT LEGEND"
                   value={pickerBadge}
                   onChange={(e) => {
-                    console.log('[Shop] Badge text input:', e.target.value);
+                    devLog('[Shop] Badge text input:', e.target.value);
                     setPickerBadge(e.target.value.toUpperCase());
                   }}
                 />

@@ -4,9 +4,10 @@ import { computeNewElos, DEFAULT_ELO, tierFromElo } from '../lib/elo';
 import { computeXpGain, levelFromXp, xpForLevel } from '../lib/xp';
 import { advanceLobbyToActive } from '../lib/roomService';
 import { pushNotificationToMany } from '../lib/pushNotification';
+import { devLog, devError } from '../lib/devLog';
 
 function log(tag, ...args) {
-  console.log(`%c[${new Date().toISOString().slice(11, 23)}] [FSM] ${tag}`, 'color:#3b82f6', ...args);
+  devLog(`%c[${new Date().toISOString().slice(11, 23)}] [FSM] ${tag}`, 'color:#3b82f6', ...args);
 }
 
 const DEFAULT_VOTING_MINUTES = 3;
@@ -231,29 +232,9 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
     if (!isOwner || !battle || !room) return;
     log('FORCE-CLOSE', 'battle:', battle.id, 'room:', room.id, 'mode:', room.mode);
 
-    if (room.mode !== 'ranked') {
-      const { data: top } = await supabase
-        .from('submissions')
-        .select('id, user_id')
-        .eq('battle_id', battle.id)
-        .order('rating_total', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      await Promise.all([
-        supabase.from('battles').update({
-          status: 'closed',
-          winner_id: top?.user_id || null,
-          early_closed: true,
-        }).eq('id', battle.id),
-        supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id)
-          .in('status', ['locked', 'voting']),
-      ]);
-      log('FORCE-CLOSE', 'SUCCESS — non-ranked');
-    } else {
-      await advanceToClosed(battle.id, room.id);
-      log('FORCE-CLOSE', 'SUCCESS — ranked');
-    }
+    // Route ALL modes through advanceToClosed so XP is granted
+    await advanceToClosed(battle.id, room.id);
+    log('FORCE-CLOSE', 'SUCCESS');
   }, [isOwner, battle, room]);
 
   return { phase, phaseEndsAt, forceStart, forceClose, isOwner, isSolo, calculatingWinner };
@@ -289,8 +270,7 @@ function phaseEndTimestamp(phase, battle, room) {
 
 function votingCloseTimestamp(battle, room) {
   if (!battle?.voting_ends_at) return null;
-  const votingMinutes = room?.voting_minutes || DEFAULT_VOTING_MINUTES;
-  return new Date(battle.voting_ends_at).getTime() + votingMinutes * 60 * 1000;
+  return new Date(battle.voting_ends_at).getTime();
 }
 
 async function advanceToActive(battleId, roomId, isSolo = false) {
@@ -412,7 +392,7 @@ async function advanceToClosed(battleId, roomId) {
 
         const eloUpdates = computeNewElos(players, ranking);
 
-        console.log('[RoomFSM] FORFEIT ELO:', { battleId, winnerId, eloUpdates });
+        devLog('[RoomFSM] FORFEIT ELO:', { battleId, winnerId, eloUpdates });
 
         const tElo = Date.now();
         await supabase.from('battles').update({ winner_id: winnerId, early_closed: true })
@@ -481,7 +461,7 @@ async function advanceToClosed(battleId, roomId) {
             eloUpdates = computeNewElos(players, ranking);
           }
 
-          console.log('[RoomFSM] NORMAL CLOSE ELO:', { battleId, winnerId, eloUpdates });
+          devLog('[RoomFSM] NORMAL CLOSE ELO:', { battleId, winnerId, eloUpdates });
 
           const tElo = Date.now();
           await Promise.all(eloUpdates.map(u => {
@@ -510,7 +490,7 @@ async function advanceToClosed(battleId, roomId) {
         }
       }
     } catch (err) {
-      console.error('[RoomFSM] ranked ELO update error:', err);
+      devError('[RoomFSM] ranked ELO update error:', err);
     }
   }
 

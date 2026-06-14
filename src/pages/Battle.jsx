@@ -33,6 +33,8 @@ import {
   getNameplateEmoji,
 } from '../lib/display';
 import { supabase } from '../lib/supabase';
+import { devLog, devError } from '../lib/devLog';
+import { censorProfanity } from '../lib/profanity';
 import { toggleReady, startCountdown, deleteRoom as deleteRoomFn } from '../lib/roomService';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
@@ -153,6 +155,7 @@ export default function Battle() {
   const chatEndRef = useRef(null);
   const seenMsgIds = useRef(new Set());
   const selfLeaving = useRef(false);
+  const lastChatSentAt = useRef(0);
 
   const myMember = members.find((m) => m.user_id === profile?.id);
   const allReady = members.length >= 2 && members.every((m) => m.is_ready);
@@ -165,7 +168,7 @@ export default function Battle() {
       room,
       profile,
       onStateChange: (newPhase, b, r) => {
-        console.log(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] PHASE → ${newPhase}`, 'color:#a855f7', { battle: b?.status, room: r?.status });
+        devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] PHASE → ${newPhase}`, 'color:#a855f7', { battle: b?.status, room: r?.status });
         if (newPhase === 'active') playUiSound('phase_change');
         if (newPhase === 'voting') playUiSound('phase_change');
       },
@@ -173,7 +176,7 @@ export default function Battle() {
 
   useEffect(() => {
     if (phase === 'closed') {
-      console.log('[Battle] STATE MACHINE — phase:', phase, { battleStatus: battle?.status, roomStatus: room?.status });
+      devLog('[Battle] STATE MACHINE — phase:', phase, { battleStatus: battle?.status, roomStatus: room?.status });
     }
   }, [phase, battle?.status, room?.status]);
 
@@ -209,7 +212,7 @@ export default function Battle() {
   useRoomEvents(room?.id, {
     profileId: profile?.id,
     onEvent: (event) => {
-      console.log(`[RoomEvent] ${event.event_type}`, event.payload);
+      devLog(`[RoomEvent] ${event.event_type}`, event.payload);
     },
     onKick: (event) => {
       addToast('YOU HAVE BEEN KICKED BY THE OWNER', 'error');
@@ -270,7 +273,7 @@ export default function Battle() {
       setLobbyTransitioning(false);
       return;
     }
-    console.log(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] LOBBY-COUNTDOWN started`, 'color:#a855f7');
+    devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] LOBBY-COUNTDOWN started`, 'color:#a855f7');
     const target = new Date(room.countdown_started_at).getTime() + 5000;
     let raf;
     function tick() {
@@ -321,7 +324,7 @@ export default function Battle() {
           await generateSoloChallenge(room.id, soloDifficulty);
           return;
         } catch (err) {
-          console.error(`[Solo] AI generation attempt ${attempt + 1} failed:`, err);
+          devError(`[Solo] AI generation attempt ${attempt + 1} failed:`, err);
           if (attempt < MAX_RETRIES - 1) {
             soloAiRetries.current = attempt + 2;
             addToast(`AI RETRY ${attempt + 2}/${MAX_RETRIES}...`);
@@ -358,11 +361,19 @@ export default function Battle() {
   const wasClosed = useRef(false);
   const oldXpRef = useRef(profile?.xp ?? 0);
   const refreshProfile = useAuthStore((s) => s.refreshProfile);
+
+  // Keep oldXpRef in sync with profile XP (captures pre-battle XP for delta calc)
+  useEffect(() => {
+    if (profile?.xp !== undefined && !wasClosed.current) {
+      oldXpRef.current = profile.xp;
+    }
+  }, [profile?.xp]);
+
   useEffect(() => {
     if (loading || !profile) return;
     if (phase === 'closed' && !wasClosed.current) {
       wasClosed.current = true;
-      console.log('[Battle] BATTLE CLOSED', { winnerId: battle?.winner_id, myId: profile.id, isRanked, isSolo });
+      devLog('[Battle] BATTLE CLOSED', { winnerId: battle?.winner_id, myId: profile.id, isRanked, isSolo });
 
       async function checkAndShowModal() {
         // Submissions may not be loaded yet — fetch directly
@@ -384,7 +395,7 @@ export default function Battle() {
         const showWin = isWinner || hasSubmitted;
 
         if (showWin) {
-          console.log('[Battle] XP MODAL', { rank: myRank || 1, hasSubmitted });
+          devLog('[Battle] XP MODAL', { rank: myRank || 1, hasSubmitted });
           playUiSound('win');
           setShowRankUpModal(true);
 
@@ -410,7 +421,7 @@ export default function Battle() {
         }
 
         if (isRanked && battle?.winner_id && battle.winner_id !== profile.id) {
-          console.log('[Battle] LOSS DETECTED', { winnerId: battle.winner_id });
+          devLog('[Battle] LOSS DETECTED', { winnerId: battle.winner_id });
           playUiSound('forfeit');
           addToast('BATTLE LOST', 'error');
           refreshProfile();
@@ -449,10 +460,13 @@ export default function Battle() {
 
   // ── Chat ──────────────────────────────────────────────────────────────────
   async function sendRoomMessage() {
-    playUiSound('chat');
     if (!profile || !room || !messageBody.trim()) return;
-    const body = messageBody.trim();
-    console.log('[Battle] SEND MESSAGE', { roomId: room.id, body: body.slice(0, 50) });
+    // Rate limit: 1 message per second
+    const now = Date.now();
+    if (now - lastChatSentAt.current < 1000) return;
+    lastChatSentAt.current = now;
+    playUiSound('chat');
+    const body = censorProfanity(messageBody.trim().slice(0, 500));
     setMessageBody('');
     try {
       const { error } = await supabase
@@ -468,15 +482,15 @@ export default function Battle() {
   async function handleForceStart() {
     if (isStarting) return;
     playUiSound('click');
-    console.log('[Battle] FORCE START', { roomId: room?.id, battleId: battle?.id, isOwner });
+    devLog('[Battle] FORCE START', { roomId: room?.id, battleId: battle?.id, isOwner });
     setIsStarting(true);
     try {
       await forceStart();
-      console.log('[Battle] FORCE START SUCCESS');
+      devLog('[Battle] FORCE START SUCCESS');
       await Promise.all([refresh(), refreshRoomData()]);
       addToast('BATTLE STARTED');
     } catch (err) {
-      console.error('[Battle] FORCE START FAILED:', err);
+      devError('[Battle] FORCE START FAILED:', err);
       addToast(err.message || 'START FAILED', 'error');
     } finally {
       setIsStarting(false);
@@ -486,15 +500,15 @@ export default function Battle() {
   async function handleForceClose() {
     if (isClosing) return;
     playUiSound('cancel');
-    console.log('[Battle] FORCE CLOSE', { roomId: room?.id, battleId: battle?.id });
+    devLog('[Battle] FORCE CLOSE', { roomId: room?.id, battleId: battle?.id });
     setIsClosing(true);
     try {
       await forceClose();
-      console.log('[Battle] FORCE CLOSE SUCCESS');
+      devLog('[Battle] FORCE CLOSE SUCCESS');
       await Promise.all([refresh(), refreshRoomData()]);
       addToast('BATTLE CLOSED');
     } catch (err) {
-      console.error('[Battle] FORCE CLOSE FAILED:', err);
+      devError('[Battle] FORCE CLOSE FAILED:', err);
       addToast(err.message || 'CLOSE FAILED', 'error');
     } finally {
       setIsClosing(false);
@@ -538,7 +552,7 @@ export default function Battle() {
     setShowDeleteRoomModal(false);
     setShowEarlyLeaveModal(false);
     if (battle?.id) markBattleLeaving(battle.id);
-    console.log('[Battle] EXECUTE LEAVE', { roomId: room.id, battleId: battle?.id, deleteRoom, isRanked: room.mode === 'ranked' });
+    devLog('[Battle] EXECUTE LEAVE', { roomId: room.id, battleId: battle?.id, deleteRoom, isRanked: room.mode === 'ranked' });
     try {
       const isRanked = room.mode === 'ranked';
       const isOwner = room.owner_id === profile.id;
@@ -1152,6 +1166,7 @@ export default function Battle() {
                   className="rdb-input"
                   disabled={!room}
                   placeholder="ROOM MESSAGE"
+                  maxLength={500}
                   value={messageBody}
                   onChange={(e) => setMessageBody(e.target.value)}
                   onKeyDown={(e) => {

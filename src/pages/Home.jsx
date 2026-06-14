@@ -7,6 +7,7 @@ import { playUiSound } from '../lib/sfx';
 import { DEFAULT_ELO, tierFromElo, computeNewElos } from '../lib/elo';
 import { isBattleClosing, markBattleLeaving, clearBattleLeaving } from '../hooks/useRoomStateMachine';
 import { supabase } from '../lib/supabase';
+import { devLog } from '../lib/devLog';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
 
@@ -240,7 +241,7 @@ export default function Home() {
 
           const eloUpdates = computeNewElos(players, ranking);
 
-          console.log('[Home] FORFEIT ELO:', { battleId: currentRoom.battle_id, winnerId, leaverId, eloUpdates });
+          devLog('[Home] FORFEIT ELO:', { battleId: currentRoom.battle_id, winnerId, leaverId, eloUpdates });
 
           // Write ELO BEFORE closing battle
           await Promise.all(eloUpdates.map(u => {
@@ -255,6 +256,18 @@ export default function Home() {
               ranked_losses: (prof?.ranked_losses || 0) + (!isWinner ? 1 : 0),
             }).eq('id', u.user_id);
           }));
+
+          // Grant XP to all participants
+          const { computeXpGain, levelFromXp } = await import('../lib/xp');
+          for (const sub of (subs || [])) {
+            const isWinner = sub.user_id === winnerId;
+            const xpGain = isWinner ? 100 : 5;
+            const { data: prof } = await supabase.from('profiles').select('xp, level').eq('id', sub.user_id).maybeSingle();
+            const oldXp = prof?.xp || 0;
+            const newXp = oldXp + xpGain;
+            const newLevel = levelFromXp(newXp);
+            await supabase.from('profiles').update({ xp: newXp, level: newLevel }).eq('id', sub.user_id);
+          }
 
           await supabase.from('battles').update({
             status: 'closed',
@@ -274,7 +287,7 @@ export default function Home() {
           const currentElo = leaverProfile?.elo ?? DEFAULT_ELO;
           const newElo = Math.max(0, currentElo - 3);
 
-          console.log('[Home] LEAVE PENALTY:', { leaverId, oldElo: currentElo, newElo, delta: -3 });
+          devLog('[Home] LEAVE PENALTY:', { leaverId, oldElo: currentElo, newElo, delta: -3 });
 
           await supabase.from('profiles').update({
             elo: newElo,

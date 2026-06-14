@@ -1,3 +1,5 @@
+import { devLog } from './devLog';
+
 export const DEFAULT_ELO = 1000;
 
 const TIER_THRESHOLDS = [
@@ -66,7 +68,7 @@ export function computeNewElos(players, ranking) {
     };
   });
 
-  console.log('[ELO] computeNewElos:', results.map(r => `${r.user_id}: ${r.oldElo}→${r.newElo} (${r.delta >= 0 ? '+' : ''}${r.delta})`).join(' | '));
+  devLog('[ELO] computeNewElos:', results.map(r => `${r.user_id}: ${r.oldElo}→${r.newElo} (${r.delta >= 0 ? '+' : ''}${r.delta})`).join(' | '));
 
   return results;
 }
@@ -159,14 +161,14 @@ export function runEloTests() {
 
   for (const s of scenarios) {
     const result = computeNewElos(s.players, s.ranking);
-    console.log(`%c=== ${s.name} ===`, 'font-weight:bold');
+    devLog(`%c=== ${s.name} ===`, 'font-weight:bold');
     for (const r of result) {
       const player = s.players.find((p) => p.user_id === r.user_id);
       const sign = r.delta >= 0 ? '+' : '';
       const oldTier = tierFromElo(r.oldElo);
       const newTier = tierFromElo(r.newElo);
       const rankChange = oldTier !== newTier ? ` (${oldTier} → ${newTier})` : '';
-      console.log(
+      devLog(
         `  ${r.user_id} (${player.rank_tier}, ${r.oldElo}elo): ${r.oldElo} → ${r.newElo} (${sign}${r.delta})${rankChange}`,
       );
     }
@@ -176,7 +178,7 @@ export function runEloTests() {
 if (typeof window !== 'undefined') {
   window.testElo = runEloTests;
   window.computeElo = (players, ranking) => {
-    console.log(computeNewElos(players, ranking));
+    devLog(computeNewElos(players, ranking));
   };
   window.tierFromElo = tierFromElo;
 }

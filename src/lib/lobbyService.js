@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { useAuthStore } from '../store/authStore';
+import { devError } from './devLog';
 
 const MAX_PLAYERS = 10;
 const MAX_QUEUE_RETRIES = 5;
@@ -264,7 +265,7 @@ export async function generateChallengeAsync(battleId, roomId, lobbyId) {
       await supabase.from('ranked_lobbies').update({ challenge: challengePayload }).eq('id', lobbyId);
       return;
     } catch (err) {
-      console.error(`generateChallengeAsync attempt ${attempt + 1} failed:`, err);
+      devError(`generateChallengeAsync attempt ${attempt + 1} failed:`, err);
       if (attempt < MAX_RETRIES - 1) await new Promise(r => setTimeout(r, 2000));
     }
   }

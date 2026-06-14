@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
 import { playUiSound } from '../lib/sfx';
 import { supabase } from '../lib/supabase';
+import { devError } from '../lib/devLog';
 import { getNameCosmeticClassName, getNameGradientStyle, getNameplateEmoji } from '../lib/display';
 import { enterQueue, leaveLobby, startCountdown, advanceLobbyToActive } from '../lib/lobbyService';
 import ChallengeReveal from '../components/battle/ChallengeReveal';
@@ -111,7 +112,7 @@ export default function Lobby() {
     const full = members.length >= (lobby.max_players || 2);
     const shouldStart = full || lobby.status === 'starting' || lobby.status === 'ready';
     if (shouldStart) {
-      startCountdown(id).catch((err) => console.error('startCountdown failed:', err));
+      startCountdown(id).catch((err) => devError('startCountdown failed:', err));
     }
   }, [members.length, lobby?.max_players, lobby?.countdown_started_at, lobby?.status, id]);
 
@@ -146,11 +147,11 @@ export default function Lobby() {
           if (battleId) {
             navigate(`/battle/${battleId}`, { replace: true });
           } else {
-            console.error('advanceLobbyToActive returned no battleId');
+            devError('advanceLobbyToActive returned no battleId');
             advancing.current = false;
           }
         }).catch((err) => {
-          console.error('advanceLobbyToActive failed:', err);
+          devError('advanceLobbyToActive failed:', err);
           advancing.current = false;
         });
       }, delay);
@@ -166,7 +167,7 @@ export default function Lobby() {
         advancing.current = false;
       }
     }).catch((err) => {
-      console.error('advanceLobbyToActive failed:', err);
+      devError('advanceLobbyToActive failed:', err);
       advancing.current = false;
     });
   }, [lobby?.countdown_started_at, id, navigate]);

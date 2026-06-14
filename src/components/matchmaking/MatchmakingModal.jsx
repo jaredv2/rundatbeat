@@ -307,7 +307,19 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                 </LabeledField>
 
                 <div className="border border-rdb-border bg-rdb-bg/50 p-3">
-                  <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Timer size={13} />Battle Time: {roomSetup.battleMinutes} min</span>
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Timer size={13} />Battle Time</span>
+                    <input
+                      className="w-16 rounded border border-rdb-border bg-rdb-bg px-2 py-0.5 font-mono text-xs text-rdb-text text-center"
+                      type="number"
+                      min="1"
+                      max="300"
+                      step="5"
+                      value={roomSetup.battleMinutes}
+                      onChange={(event) => updateRoomSetup('battleMinutes', Math.min(300, Math.max(1, Number(event.target.value) || 1)))}
+                    />
+                    <span className="font-mono text-[10px] text-rdb-text/50">min</span>
+                  </div>
                   <input
                     className="w-full accent-rdb-orange"
                     type="range"
@@ -323,7 +335,19 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                 </div>
 
                 <div className="border border-rdb-border bg-rdb-bg/50 p-3">
-                  <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Timer size={13} />Voting Time: {roomSetup.votingMinutes} min</span>
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Timer size={13} />Voting Time</span>
+                    <input
+                      className="w-16 rounded border border-rdb-border bg-rdb-bg px-2 py-0.5 font-mono text-xs text-rdb-text text-center"
+                      type="number"
+                      min="1"
+                      max="15"
+                      step="1"
+                      value={roomSetup.votingMinutes}
+                      onChange={(event) => updateRoomSetup('votingMinutes', Math.min(15, Math.max(1, Number(event.target.value) || 1)))}
+                    />
+                    <span className="font-mono text-[10px] text-rdb-text/50">min</span>
+                  </div>
                   <input
                     className="w-full accent-rdb-orange"
                     type="range"
@@ -339,7 +363,19 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                 </div>
 
                 <div className="border border-rdb-border bg-rdb-bg/50 p-3">
-                  <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Music size={13} />Song Length: {roomSetup.songLengthSeconds >= 600 ? '∞' : `${roomSetup.songLengthSeconds}s`}</span>
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Music size={13} />Song Length</span>
+                    <input
+                      className="w-16 rounded border border-rdb-border bg-rdb-bg px-2 py-0.5 font-mono text-xs text-rdb-text text-center"
+                      type="number"
+                      min="15"
+                      max="600"
+                      step="15"
+                      value={Math.min(roomSetup.songLengthSeconds, 600)}
+                      onChange={(event) => updateRoomSetup('songLengthSeconds', Math.min(600, Math.max(15, Number(event.target.value) || 15)))}
+                    />
+                    <span className="font-mono text-[10px] text-rdb-text/50">sec</span>
+                  </div>
                   <input
                     className="w-full accent-rdb-orange"
                     type="range"
@@ -361,6 +397,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                     type="range"
                     min="2"
                     max="10"
+                    step="1"
                     value={roomSetup.maxPlayers}
                     onChange={(event) => updateRoomSetup('maxPlayers', Number(event.target.value))}
                   />

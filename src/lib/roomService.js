@@ -1,7 +1,8 @@
 import { supabase } from './supabase';
+import { devLog } from './devLog';
 
 function log(tag, ...args) {
-  console.log(`%c[${new Date().toISOString().slice(11, 23)}] [ROOM] ${tag}`, 'color:#f97316', ...args);
+  devLog(`%c[${new Date().toISOString().slice(11, 23)}] [ROOM] ${tag}`, 'color:#f97316', ...args);
 }
 
 export async function createRoom({ isPublic, hostId, maxPlayers = 4, battleMinutes = 45, songLengthSeconds = 60, votingMinutes = 3, name, allowInstructions = true, allowRestrictions = true }) {

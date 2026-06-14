@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useFriends } from '../../hooks/useFriends';
 import { createRoom } from '../../lib/roomService';
 import { supabase } from '../../lib/supabase';
+import { devLog, devError } from '../../lib/devLog';
 import { useAuthStore } from '../../store/authStore';
 import { useFriendStore } from '../../store/friendStore';
 import { useUiStore } from '../../store/uiStore';
@@ -84,7 +85,7 @@ export default function FriendsDock() {
         c.challenger_id === profile?.id
     );
     if (acc) {
-      console.log('[1v1] challenger auto-navigating to battle', { battle_id: acc.battle_id });
+      devLog('[1v1] challenger auto-navigating to battle', { battle_id: acc.battle_id });
       setOpen(false);
       navigate(`/battle/${acc.battle_id}`);
     }
@@ -227,7 +228,7 @@ export default function FriendsDock() {
   async function sendChallenge(friendId) {
     playUiSound('click');
     try {
-      console.log('[1v1] sendChallenge', { from: profile.id, to: friendId });
+      devLog('[1v1] sendChallenge', { from: profile.id, to: friendId });
       const { error } = await supabase.from('challenges').insert({
         challenger_id: profile.id, challengee_id: friendId, status: 'pending',
       });
@@ -240,7 +241,7 @@ export default function FriendsDock() {
         actorId: profile.id,
       });
     } catch (err) {
-      console.error('[1v1] sendChallenge FAILED', err);
+      devError('[1v1] sendChallenge FAILED', err);
       addToast(err.message || 'CHALLENGE FAILED', 'error');
     }
   }
@@ -261,15 +262,15 @@ export default function FriendsDock() {
     playUiSound('success');
     try {
       const challenge = challenges.find((c) => c.id === challengeId);
-      if (!challenge) { console.error('[1v1] acceptChallenge: challenge not found', challengeId); return; }
+      if (!challenge) { devError('[1v1] acceptChallenge: challenge not found', challengeId); return; }
       const otherId = challenge.challenger_id === profile.id ? challenge.challengee_id : challenge.challenger_id;
-      console.log('[1v1] acceptChallenge', { challengeId, accepter: profile.id, other: otherId });
+      devLog('[1v1] acceptChallenge', { challengeId, accepter: profile.id, other: otherId });
       const { error } = await supabase.from('challenges').update({ status: 'accepted' }).eq('id', challengeId).eq('status', 'pending');
       if (error) throw error;
       addToast('CHALLENGE ACCEPTED — CREATING ROOM');
       await createChallengeBattle(challengeId, profile.id, otherId);
     } catch (err) {
-      console.error('[1v1] acceptChallenge FAILED', err);
+      devError('[1v1] acceptChallenge FAILED', err);
       addToast(err.message || 'ACCEPT FAILED', 'error');
       loadChallenges();
     }
@@ -277,7 +278,7 @@ export default function FriendsDock() {
 
   async function createChallengeBattle(challengeId, userId1, userId2) {
     try {
-      console.log('[1v1] createChallengeBattle', { challengeId, host: userId1, joiner: userId2 });
+      devLog('[1v1] createChallengeBattle', { challengeId, host: userId1, joiner: userId2 });
       const { room } = await createRoom({
         timerEnabled: true,
         isPublic: false,
@@ -287,17 +288,17 @@ export default function FriendsDock() {
         songLengthSeconds: 60,
         votingMinutes: 2,
       });
-      console.log('[1v1] room created', { roomId: room.id });
+      devLog('[1v1] room created', { roomId: room.id });
 
       await supabase.from('room_members').upsert({ room_id: room.id, user_id: userId2, role: 'member', is_ready: false });
       await supabase.from('rooms').update({ current_players: 2 }).eq('id', room.id);
       await supabase.from('challenges').update({ battle_id: room.id }).eq('id', challengeId);
-      console.log('[1v1] challenge updated with battle_id', { battle_id: room.id });
+      devLog('[1v1] challenge updated with battle_id', { battle_id: room.id });
 
       setOpen(false);
       navigate(`/battle/${room.id}`);
     } catch (err) {
-      console.error('[1v1] createChallengeBattle FAILED', err);
+      devError('[1v1] createChallengeBattle FAILED', err);
       await supabase.from('challenges').update({ status: 'declined' }).eq('id', challengeId);
       throw err;
     }
