@@ -86,8 +86,7 @@ export async function advanceLobbyToActive(roomId) {
     .select('room_id', { count: 'exact' })
     .eq('room_id', roomId);
 
-  const startDelay = 15;
-  const starts = new Date(Date.now() + startDelay * 1000);
+  const starts = new Date();
   const duration = room?.challenge?.battleMinutes || 15;
   const songLength = room?.song_length_seconds || 60;
   const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);

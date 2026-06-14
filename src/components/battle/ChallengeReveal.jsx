@@ -175,18 +175,6 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
               </span>
             </div>
           )}
-
-          {/* Full challenge preview when revealed */}
-          {!hideChallenge && revealed && challenge && challenge.restrictionsList && (
-            <div className="space-y-3 pt-2 text-left">
-              <div>
-                <p className="font-mono text-[10px] uppercase text-rdb-red mb-1">RESTRICTIONS</p>
-                <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-3">
-                  {challenge.restrictionsList}
-                </p>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

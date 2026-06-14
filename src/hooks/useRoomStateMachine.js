@@ -13,7 +13,7 @@ function log(tag, ...args) {
 const DEFAULT_VOTING_MINUTES = 3;
 const LOBBY_COUNTDOWN_MS = 5000;
 const TICK_INTERVAL_MS = 3000;
-const POST_VOTING_CLOSE_DELAY_MS = 5000; // 5 seconds after voting ends before advanceToClosed
+
 const POST_BATTLE_CLOSE_DELAY_MS = 5 * 60 * 1000; // 5 minutes after battle closes before room is deleted
 const _closingGuards = new Map();
 
@@ -141,10 +141,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         if (!closingRef.current && (allStopped || (closedAt && now >= closedAt))) {
           closingRef.current = true;
           setCalculatingWinner(true);
-          log('TICK', 'voting ended — allStopped:', allStopped, '→ waiting', POST_VOTING_CLOSE_DELAY_MS + 'ms');
-          // Grace period so users see the transition before results
-          await new Promise(r => setTimeout(r, POST_VOTING_CLOSE_DELAY_MS));
-          log('TICK', 'post-voting delay expired → advanceToClosed');
+          log('TICK', 'voting ended — allStopped:', allStopped, '→ advanceToClosed');
           try {
             await advanceToClosed(b.id, r.id);
           } finally {
@@ -434,13 +431,16 @@ async function advanceToClosed(battleId, roomId) {
         await Promise.all(eloUpdates.map(u => {
           const prof = (profiles || []).find(p => p.id === u.user_id);
           const isWinner = u.user_id === winnerId;
+          const isRanked = battle?.mode === 'ranked';
           return supabase.from('profiles').update({
             elo: u.newElo,
             rank_tier: tierFromElo(u.newElo),
             wins: (prof?.wins || 0) + (isWinner ? 1 : 0),
             battles_entered: (prof?.battles_entered || 0) + 1,
-            ranked_wins: (prof?.ranked_wins || 0) + (isWinner ? 1 : 0),
-            ranked_losses: (prof?.ranked_losses || 0) + (!isWinner ? 1 : 0),
+            ...(isRanked ? {
+              ranked_wins: (prof?.ranked_wins || 0) + (isWinner ? 1 : 0),
+              ranked_losses: (prof?.ranked_losses || 0) + (!isWinner ? 1 : 0),
+            } : {}),
           }).eq('id', u.user_id);
         }));
         log('FORFEIT ELO', 'profiles updated in', (Date.now() - tElo) + 'ms');
@@ -500,13 +500,16 @@ async function advanceToClosed(battleId, roomId) {
           await Promise.all(eloUpdates.map(u => {
             const prof = (profiles || []).find(p => p.id === u.user_id);
             const isFirst = ranking[u.user_id] === 1;
+            const isRanked = battle?.mode === 'ranked';
             return supabase.from('profiles').update({
               elo: u.newElo,
               rank_tier: tierFromElo(u.newElo),
               wins: (prof?.wins || 0) + (isFirst ? 1 : 0),
               battles_entered: (prof?.battles_entered || 0) + 1,
-              ranked_wins: (prof?.ranked_wins || 0) + (isFirst ? 1 : 0),
-              ranked_losses: (prof?.ranked_losses || 0) + (!isFirst ? 1 : 0),
+              ...(isRanked ? {
+                ranked_wins: (prof?.ranked_wins || 0) + (isFirst ? 1 : 0),
+                ranked_losses: (prof?.ranked_losses || 0) + (!isFirst ? 1 : 0),
+              } : {}),
             }).eq('id', u.user_id);
           }));
           log('NORMAL ELO', 'profiles updated in', (Date.now() - tElo) + 'ms');
@@ -571,7 +574,7 @@ async function advanceToClosed(battleId, roomId) {
   const tClose = Date.now();
   const battleRes = await supabase
     .from('battles')
-    .update({ status: 'closed', ...(isAutoClose ? { early_closed: true } : {}) })
+    .update({ status: 'closed', closed_at: new Date().toISOString(), ...(isAutoClose ? { early_closed: true } : {}) })
     .eq('id', battleId)
     .in('status', ['upcoming', 'active', 'voting']);
   if (battleRes.error) throw new Error(`advanceToClosed battles: ${battleRes.error.message}`);

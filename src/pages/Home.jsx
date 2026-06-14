@@ -335,40 +335,6 @@ export default function Home() {
       {/* ── Queue card (top center) ── */}
       {queueLobby && <QueueCard onLeave={handleLeaveQueue} />}
 
-      {/* ── Active room reminder card ── */}
-      {currentRoom && (
-        <aside className="matchmaking-status-card mt-3">
-          <div className="font-mono text-[10px] uppercase text-rdb-muted">Active Room</div>
-          <div className="mt-1 font-mono text-sm uppercase text-rdb-text">
-            {currentRoom.battles?.title || currentRoom.name || 'BATTLE ROOM'}
-          </div>
-          <div className="mt-2 font-mono text-[10px] uppercase text-rdb-muted">
-            STATUS <b className={currentRoom.status === 'open' ? 'text-green-400' : 'text-yellow-400'}>
-              {currentRoom.status?.toUpperCase()}
-            </b>
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button
-              className="rdb-button rdb-button-primary"
-              type="button"
-              onClick={() => {
-                navigate(`/battle/${currentRoom.battle_id}`);
-              }}
-            >
-              REJOIN
-            </button>
-            <button
-              className="rdb-button"
-              type="button"
-              disabled={busy}
-              onClick={leaveCurrentRoom}
-            >
-              LEAVE
-            </button>
-          </div>
-        </aside>
-      )}
-
       <section className="home-menu">
         <h1 className="flex flex-col items-center gap-3">
           <img src="/logo.png" alt="RUNDATBEAT" className="h-28 w-28 sm:h-36 sm:w-36" />

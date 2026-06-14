@@ -655,29 +655,10 @@ export default function Battle() {
           )
         ) : room?.challenge && phase === 'active' ? (
           <SampleCard challenge={room.challenge} phase={phase} room={room} />
+        ) : phase === 'voting' ? (
+          <></>
         ) : (
           <BattlePrompt battle={battle} />
-        )}
-        {phase === 'active' && (
-          <div className="rdb-panel p-5 text-center">
-            <PhaseTimer
-              label="SESSION"
-              target={battle.voting_ends_at}
-            />
-            <button
-              className="rdb-button border-rdb-red text-rdb-red mt-4"
-              type="button"
-              disabled={isClosing}
-              onClick={handleForceClose}
-            >
-              {isClosing ? 'CLOSING...' : 'END SESSION'}
-            </button>
-          </div>
-        )}
-        {phase === 'closed' && (
-          <div className="rdb-panel p-5 text-center font-mono text-[11px] uppercase text-rdb-muted">
-            Session ended.
-          </div>
         )}
 
         {/* ── Leave button ── */}
@@ -830,6 +811,8 @@ export default function Battle() {
             <></>
           ) : room?.challenge && phase === 'active' ? (
             <SampleCard challenge={room.challenge} phase={phase} room={room} />
+          ) : phase === 'voting' ? (
+            <></>
           ) : (
             <BattlePrompt battle={battle} />
           )}
@@ -957,7 +940,14 @@ export default function Battle() {
               <button
                 className="rdb-button rdb-button-primary"
                 type="button"
-                onClick={() => navigate('/')}
+                onClick={async () => {
+                  if (profile?.id && room?.id) {
+                    await supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id);
+                    const { count } = await supabase.from('room_members').select('room_id', { count: 'exact', head: true }).eq('room_id', room.id);
+                    await supabase.from('rooms').update({ current_players: count ?? 0 }).eq('id', room.id);
+                  }
+                  navigate('/');
+                }}
               >
                 GO HOME
               </button>

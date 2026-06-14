@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Music, Timer, Users, Wand2, X } from 'lucide-react';
 import { difficultyFromTier, getSoloDurationMinutes } from '../../lib/groq';
@@ -26,6 +27,8 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
   const [tab, setTab] = useState('ranked');
   const [visibleRooms, setVisibleRooms] = useState([]);
   const [roomsLoading, setRoomsLoading] = useState(true);
+  const [roomsPage, setRoomsPage] = useState(0);
+  const [hasMoreRooms, setHasMoreRooms] = useState(false);
   const [roomSetup, setRoomSetup] = useState(DEFAULT_ROOM_SETUP);
   const [status, setStatus] = useState('idle');
   const queueingRef = useRef(false);
@@ -34,19 +37,22 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
 
   useEffect(() => {
     if (!open) return;
-    loadRooms(true);
+    setRoomsPage(0);
+    setHasMoreRooms(false);
+    loadRooms(true, 0);
     const channel = supabase
       .channel('matchmaking-rooms')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => loadRooms())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members' }, () => loadRooms())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => loadRooms(false, 0))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members' }, () => loadRooms(false, 0))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [open]);
 
   if (!open) return null;
 
-  async function loadRooms(isInitial = false) {
+  async function loadRooms(isInitial = false, page = 0) {
     if (isInitial) setRoomsLoading(true);
+    const PAGE_SIZE = 12;
     try {
       const { data } = await supabase
         .from('rooms')
@@ -55,8 +61,13 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
         .neq('mode', 'ranked')
         .eq('is_public', true)
         .order('created_at', { ascending: false })
-        .limit(12);
-      setVisibleRooms(data || []);
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      if (page === 0) {
+        setVisibleRooms(data || []);
+      } else {
+        setVisibleRooms((prev) => [...prev, ...(data || [])]);
+      }
+      setHasMoreRooms((data || []).length === PAGE_SIZE);
     } catch {
       // Silently handle
     } finally {
@@ -167,8 +178,8 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-40 flex justify-center overflow-y-auto bg-black/70 p-4 py-8 backdrop-blur-xl">
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex justify-center overflow-y-auto bg-black/70 p-4 py-8 backdrop-blur-xl">
       <section className="apple-modal my-auto w-full max-w-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -282,7 +293,8 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                               playUiSound('cancel');
                               await deleteRoom(room.id);
                               addToast('ROOM DELETED');
-                              loadRooms();
+                              setRoomsPage(0);
+                              loadRooms(false, 0);
                             }}>REMOVE</button>
                           )}
                         </div>
@@ -292,6 +304,20 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                 })}
                 {!visibleRooms.length && roomsLoading && <div className="rounded-lg border border-rdb-border bg-rdb-bg p-3 text-sm text-rdb-text/50">Loading rooms...</div>}
                 {!visibleRooms.length && !roomsLoading && <div className="rounded-lg border border-rdb-border bg-rdb-bg p-3 text-sm text-rdb-text/50">No public rooms yet.</div>}
+                {visibleRooms.length > 0 && hasMoreRooms && (
+                  <button
+                    className="rdb-button w-full justify-center"
+                    disabled={roomsLoading}
+                    type="button"
+                    onClick={() => {
+                      const nextPage = roomsPage + 1;
+                      setRoomsPage(nextPage);
+                      loadRooms(false, nextPage);
+                    }}
+                  >
+                    {roomsLoading ? 'Loading...' : 'Load More'}
+                  </button>
+                )}
               </div>
             </div>
             <div className="rounded-lg border border-rdb-border bg-rdb-bg/70 p-3">
@@ -420,7 +446,8 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
           </div>
         )}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 
   function updateRoomSetup(key, value) {

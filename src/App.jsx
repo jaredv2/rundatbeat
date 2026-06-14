@@ -7,7 +7,7 @@ import { devError } from './lib/devLog';
 
 import ToastNotification from './components/ui/ToastNotification';
 import Spinner from './components/ui/Spinner';
-import { useRoomCleanup } from './hooks/useRoomCleanup';
+
 import { useNotifications } from './hooks/useNotifications';
 import { grantDailyLogin } from './lib/tokenHelpers';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
@@ -112,16 +112,20 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
   const dailyLoginCheckedRef = useRef(false);
+  const lastSessionRef = useRef(null);
   const [authReady, setAuthReady] = useState(false);
 
   // Updates document.title on every route change
   usePageTitle();
-  useRoomCleanup();
+
   useNotifications();
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return undefined; }
     async function hydrate(session) {
+      const sessionKey = session?.access_token || session?.user?.id || null;
+      if (sessionKey && sessionKey === lastSessionRef.current) return;
+      lastSessionRef.current = sessionKey;
       try {
         setSession(session);
         if (session?.user) {
