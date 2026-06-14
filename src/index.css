@@ -96,12 +96,12 @@ body {
   position: relative;
   z-index: 1;
   display: flex;
-  flex: 1 0 auto;
+  flex: 1 1 0;
   flex-direction: column;
 }
 
 .app-content > main {
-  flex: 1 0 auto;
+  flex: 1 1 0;
 }
 
 /* ── Container (standardized 800px) ─────────────────────────────────── */
@@ -433,9 +433,8 @@ button {
 .home-stage {
   position: relative;
   display: grid;
-  min-height: calc(100vh - 60px);
   place-items: center;
-  overflow: hidden;
+  overflow-y: auto;
   padding: 48px 16px;
 }
 

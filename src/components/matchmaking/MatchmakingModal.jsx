@@ -240,13 +240,9 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
           </div>
         ) : tab === 'ranked' ? (
           <div className="mt-6 grid gap-4 md:grid-cols-[1fr_180px]">
-            <div className="rounded-lg border border-rdb-border bg-rdb-bg/70 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-rdb-text">Ranked Queue</div>
-                </div>
-              </div>
-              <div className="mt-4 font-mono text-[11px] uppercase text-rdb-text/40 text-center py-8">
+            <div className="rounded-lg border border-rdb-border bg-rdb-bg/70 p-5">
+              <div className="text-sm font-semibold text-rdb-text">Ranked Queue</div>
+              <div className="mt-3 font-mono text-[11px] uppercase text-rdb-text/40 text-center">
                 Find a match and get taken to the lobby
               </div>
             </div>

@@ -17,7 +17,7 @@ export default function QueueCard({ onLeave }) {
   const secs = String(elapsed % 60).padStart(2, '0');
 
   return (
-    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm">
+    <div className="fixed top-[64px] left-1/2 -translate-x-1/2 z-50 w-full max-w-sm">
       <div className="rdb-panel p-4 flex items-center gap-4 shadow-2xl shadow-black/50">
         {/* Pulsing dot */}
         <span className="relative flex h-3 w-3 flex-shrink-0">
