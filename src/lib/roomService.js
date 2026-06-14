@@ -92,6 +92,9 @@ export async function advanceLobbyToActive(roomId) {
   const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
   log('LOBBY→ACTIVE', 'players:', playerCount, 'duration:', duration + 'min', 'starts:', starts.toISOString());
 
+  const isSolo = room?.mode === 'solo';
+  const battleStatus = isSolo ? 'active' : 'upcoming';
+
   try {
     const { data: battle, error: battleErr } = await supabase.from('battles').insert({
       title: 'CUSTOM BATTLE',
@@ -103,8 +106,8 @@ export async function advanceLobbyToActive(roomId) {
       flavor_text: '',
       duration_minutes: duration,
       song_length_seconds: songLength,
-      mode: 'quick',
-      status: 'upcoming',
+      mode: isSolo ? 'solo' : 'quick',
+      status: battleStatus,
       starts_at: starts.toISOString(),
       voting_ends_at: votingEnds.toISOString(),
     }).select('id').single();

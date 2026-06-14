@@ -138,8 +138,8 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
         duration_minutes: durationMin,
         song_length_seconds: 60,
         mode: 'solo',
-        status: 'upcoming',
-        starts_at: new Date(Date.now() + 30 * 1000).toISOString(),
+        status: 'active',
+        starts_at: new Date().toISOString(),
         voting_ends_at: new Date(Date.now() + durationMin * 60 * 1000).toISOString(),
         created_by: profile.id,
       }).select('id').single();
