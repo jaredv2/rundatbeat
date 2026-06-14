@@ -128,7 +128,7 @@ export async function advanceLobbyToActive(roomId) {
           battleMinutes: existingChallenge.battleMinutes || duration,
         },
         countdown_started_at: null,
-        battle_starts_in_seconds: startDelay,
+        battle_starts_in_seconds: 0,
       })
       .eq('id', roomId)
       .eq('status', 'lobby')
