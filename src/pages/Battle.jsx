@@ -24,6 +24,7 @@ import ChallengeReveal from '../components/battle/ChallengeReveal';
 import WaveformPlayer from '../components/audio/WaveformPlayer';
 import { useBattle } from '../hooks/useBattle';
 import { useRoomStateMachine, markBattleLeaving, clearBattleLeaving } from '../hooks/useRoomStateMachine';
+import { useRoomEvents, dispatchRoomEvent } from '../hooks/useRoomEvents';
 import { useCountdown } from '../hooks/useCountdown';
 import {
   formatNumber,
@@ -32,7 +33,7 @@ import {
   getNameplateEmoji,
 } from '../lib/display';
 import { supabase } from '../lib/supabase';
-import { toggleReady, leaveLobby, startCountdown, deleteRoom as deleteRoomFn } from '../lib/roomService';
+import { toggleReady, startCountdown, deleteRoom as deleteRoomFn } from '../lib/roomService';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
 import { playUiSound } from '../lib/sfx';
@@ -133,7 +134,6 @@ export default function Battle() {
     useBattle(id);
 
   const [ratings, setRatings]       = useState({});
-  const [descriptions, setDescriptions] = useState({});
   const [paid, setPaid]             = useState(false);
   const [messageBody, setMessageBody] = useState('');
   const QUICK_EMOJIS = ['🔥', '🎵', '💯', '🎤', '🏆'];
@@ -151,6 +151,7 @@ export default function Battle() {
   const [countdown, setCountdown] = useState(null);
   const [lobbyTransitioning, setLobbyTransitioning] = useState(false);
   const chatEndRef = useRef(null);
+  const seenMsgIds = useRef(new Set());
   const selfLeaving = useRef(false);
 
   const myMember = members.find((m) => m.user_id === profile?.id);
@@ -197,9 +198,6 @@ export default function Battle() {
       setRatings(
         Object.fromEntries((voteRows || []).map((r) => [r.submission_id, r.rating])),
       );
-      setDescriptions(
-        Object.fromEntries((voteRows || []).map((r) => [r.submission_id, r.description || ''])),
-      );
       setPaid(Boolean(tx));
     }
     loadRatingsAndPaid();
@@ -207,30 +205,58 @@ export default function Battle() {
 
   // ── Auto-scroll chat ──────────────────────────────────────────────────────
 
+  // ── Room events (kick, close, etc.) ─────────────────────────────────────
+  useRoomEvents(room?.id, {
+    profileId: profile?.id,
+    onEvent: (event) => {
+      console.log(`[RoomEvent] ${event.event_type}`, event.payload);
+    },
+    onKick: (event) => {
+      addToast('YOU HAVE BEEN KICKED BY THE OWNER', 'error');
+    },
+    onCloseRoom: () => {
+      addToast('ROOM CLOSED BY OWNER', 'error');
+    },
+  });
+
   // ── Leave cleanup on tab close (ranked rooms only — custom rooms auto-rejoin) ─
   useEffect(() => {
     if (!profile || !room) return;
 
-    const doLeave = () => {
+    const doLeave = async () => {
       if (selfLeaving.current) return;
       if (room.mode !== 'ranked') return;
+      if (phase === 'closed') return;
       selfLeaving.current = true;
-      const isRankedHost = room.mode === 'ranked' && room.owner_id === profile.id;
-      supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id).then(() => {
-        if (isRankedHost) {
-          supabase.from('room_members').select('user_id').eq('room_id', room.id).then(({ data: remaining }) => {
-            if (remaining?.length) {
-              const newHost = remaining[0];
-              supabase.from('rooms').update({ owner_id: newHost.user_id }).eq('id', room.id);
-              supabase.from('room_members').update({ role: 'owner' }).eq('room_id', room.id).eq('user_id', newHost.user_id);
-            }
-          });
-        }
-        supabase.from('room_members').select('room_id', { count: 'exact' }).eq('room_id', room.id).then(({ count }) => {
-          if (count <= 0) supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
-          else supabase.from('rooms').update({ current_players: count }).eq('id', room.id);
+
+      // Use sendBeacon for reliable delivery during page unload
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) return;
+        const body = JSON.stringify({
+          roomId: room.id,
+          eventType: 'player_leave',
+          payload: { isRanked: true, battleId: room.battle_id || '' },
         });
-      });
+        navigator.sendBeacon(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/room-events`,
+          new Blob([body], { type: 'application/json' })
+        );
+        // Also set Authorization via header trick — sendBeacon doesn't support custom headers
+        // So we fall back to a quick fetch with keepalive
+        fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/room-events`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body,
+          keepalive: true,
+        }).catch(() => {});
+      } catch {
+        // Best-effort on page unload
+      }
     };
 
     window.addEventListener('beforeunload', doLeave);
@@ -338,45 +364,59 @@ export default function Battle() {
       wasClosed.current = true;
       console.log('[Battle] BATTLE CLOSED', { winnerId: battle?.winner_id, myId: profile.id, isRanked, isSolo });
 
-      const isWinner = battle?.winner_id === profile.id;
-      const sorted = !isSolo && submissions.length > 0
-        ? [...submissions].sort((a, b) => (b.rating_total ?? 0) - (a.rating_total ?? 0))
-        : [];
-      const myRank = sorted.findIndex(s => s.user_id === profile.id) + 1;
-      const showWin = isWinner || (myRank > 0 && myRank <= 3);
+      async function checkAndShowModal() {
+        // Submissions may not be loaded yet — fetch directly
+        let subs = submissions;
+        if (!subs.length && battle?.id) {
+          const { data } = await supabase
+            .from('submissions')
+            .select('user_id, rating_total')
+            .eq('battle_id', battle.id);
+          subs = data || [];
+        }
 
-      if (showWin) {
-        console.log('[Battle] WIN/PLACEMENT DETECTED', { rank: myRank || 1 });
-        playUiSound('win');
-        setShowRankUpModal(true);
+        const isWinner = battle?.winner_id === profile.id;
+        const sorted = subs.length > 0
+          ? [...subs].sort((a, b) => (b.rating_total ?? 0) - (a.rating_total ?? 0))
+          : [];
+        const myRank = sorted.findIndex(s => s.user_id === profile.id) + 1;
+        const hasSubmitted = subs.some(s => s.user_id === profile.id);
+        const showWin = isWinner || hasSubmitted;
 
-        async function fetchXpWithRetry(attempts = 0) {
-          const { data } = await supabase.from('profiles').select('xp, level').eq('id', profile.id).maybeSingle();
-          const newXpVal = data?.xp ?? oldXpRef.current;
-          const gain = newXpVal - oldXpRef.current;
-          if (gain === 0 && attempts < 3) {
-            await new Promise(r => setTimeout(r, 800));
-            return fetchXpWithRetry(attempts + 1);
+        if (showWin) {
+          console.log('[Battle] XP MODAL', { rank: myRank || 1, hasSubmitted });
+          playUiSound('win');
+          setShowRankUpModal(true);
+
+          async function fetchXpWithRetry(attempts = 0) {
+            const { data } = await supabase.from('profiles').select('xp, level').eq('id', profile.id).maybeSingle();
+            const newXpVal = data?.xp ?? oldXpRef.current;
+            const gain = newXpVal - oldXpRef.current;
+            if (gain === 0 && attempts < 3) {
+              await new Promise(r => setTimeout(r, 800));
+              return fetchXpWithRetry(attempts + 1);
+            }
+            const oldLevel = profile.level || 1;
+            const newLevel = data?.level || 1;
+            setRankUpXpGain(gain || 5);
+            setRankUpOldXp(oldXpRef.current);
+            setRankUpNewXp(newXpVal);
+            setRankUpOldLevel(oldLevel);
+            setRankUpNewLevel(newLevel);
+            refreshProfile();
           }
-          const oldLevel = profile.level || 1;
-          const newLevel = data?.level || 1;
-          setRankUpXpGain(gain || 5);
-          setRankUpOldXp(oldXpRef.current);
-          setRankUpNewXp(newXpVal);
-          setRankUpOldLevel(oldLevel);
-          setRankUpNewLevel(newLevel);
+          fetchXpWithRetry();
+          return;
+        }
+
+        if (isRanked && battle?.winner_id && battle.winner_id !== profile.id) {
+          console.log('[Battle] LOSS DETECTED', { winnerId: battle.winner_id });
+          playUiSound('forfeit');
+          addToast('BATTLE LOST', 'error');
           refreshProfile();
         }
-        fetchXpWithRetry();
-        return;
       }
-
-      if (isRanked && battle?.winner_id && battle.winner_id !== profile.id) {
-        console.log('[Battle] LOSS DETECTED', { winnerId: battle.winner_id });
-        playUiSound('forfeit');
-        addToast('BATTLE LOST', 'error');
-        refreshProfile();
-      }
+      checkAndShowModal();
     }
   }, [phase, loading, profile?.id]);
 
@@ -405,7 +445,6 @@ export default function Battle() {
       .eq('battle_id', id)
       .eq('voter_id', profile.id);
     setRatings(Object.fromEntries((data || []).map((r) => [r.submission_id, r.rating])));
-    setDescriptions(Object.fromEntries((data || []).map((r) => [r.submission_id, r.description || ''])));
   }
 
   // ── Chat ──────────────────────────────────────────────────────────────────
@@ -489,6 +528,11 @@ export default function Battle() {
 
   async function executeLeave(deleteRoom = false) {
     if (!profile || !room || leavingRoom) return;
+    if (phase === 'closed' || battle?.status === 'closed') {
+      window.__clearReturnTo?.();
+      navigate('/', { replace: true });
+      return;
+    }
     selfLeaving.current = true;
     setLeavingRoom(true);
     setShowDeleteRoomModal(false);
@@ -499,18 +543,13 @@ export default function Battle() {
       const isRanked = room.mode === 'ranked';
       const isOwner = room.owner_id === profile.id;
 
-      // Owner leaving a custom room — kick everyone, close, and remove room
+      // Owner leaving a custom room — dispatch owner_leave event (server handles cleanup)
       if (isOwner && !isRanked) {
-        // Remove all members from room_members
-        await supabase.from('room_members').delete().eq('room_id', room.id);
-        // Close battle if it exists
-        if (battle?.id) {
-          await supabase.from('battles').update({ status: 'closed', early_closed: true }).eq('id', battle.id);
-        }
-        // Delete chat messages, close and delete room
-        await supabase.from('room_messages').delete().eq('room_id', room.id);
-        await supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
-        await supabase.from('rooms').delete().eq('id', room.id);
+        await dispatchRoomEvent({
+          roomId: room.id,
+          eventType: 'owner_leave',
+          payload: { battleId: battle?.id },
+        });
         window.__clearReturnTo?.();
         navigate('/', { replace: true });
         return;
@@ -521,80 +560,22 @@ export default function Battle() {
         await supabase.from('battles').update({ early_closed: true }).eq('id', battle.id).eq('early_closed', false);
       }
 
-      // Remove from room_members. For ranked, DON'T delete submissions —
-      // advanceToClosed needs them for ELO calculation.
-      await Promise.all([
-        supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id),
-        !isRanked && room.battle_id ? supabase.from('submissions').delete().eq('battle_id', room.battle_id).eq('user_id', profile.id) : null,
-        !isRanked && room.battle_id ? supabase.from('votes').delete().eq('battle_id', room.battle_id).eq('voter_id', profile.id) : null,
-        supabase.from('ranked_lobby_members').delete().eq('user_id', profile.id),
-      ]);
-
-      // Recompute rating aggregates for remaining submissions after vote deletion (non-ranked only)
-      if (!isRanked && room.battle_id) {
-        const { data: remainingSubs } = await supabase
-          .from('submissions')
-          .select('id')
-          .eq('battle_id', room.battle_id);
-        for (const sub of remainingSubs || []) {
-          const { data: votes } = await supabase
-            .from('votes')
-            .select('rating, weight')
-            .eq('submission_id', sub.id);
-          if (votes?.length) {
-            const total = votes.reduce((sum, v) => sum + (v.rating || 0) * (v.weight || 1), 0);
-            await supabase.from('submissions').update({ rating_total: total, vote_count: votes.length }).eq('id', sub.id);
-          }
-        }
-      }
-
-      // Transfer ownership if leaving player is room owner (ranked + custom)
-      if (room.owner_id === profile.id) {
-        const { data: remainingMembers } = await supabase
-          .from('room_members')
-          .select('user_id')
-          .eq('room_id', room.id);
-        if (remainingMembers?.length) {
-          const newHost = remainingMembers[0];
-          await Promise.all([
-            supabase.from('rooms').update({ owner_id: newHost.user_id }).eq('id', room.id),
-            supabase.from('room_members').update({ role: 'owner' }).eq('room_id', room.id).eq('user_id', newHost.user_id),
-          ]);
-        }
-      }
+      // Dispatch player_leave event — server handles member removal, submission/vote cleanup,
+      // rating recompute, owner transfer, and room closure atomically
+      await dispatchRoomEvent({
+        roomId: room.id,
+        eventType: 'player_leave',
+        payload: { isRanked, battleId: room.battle_id || '' },
+      });
 
       window.__clearReturnTo?.();
 
       if (deleteRoom) {
-        await Promise.all([
-          supabase.from('battles').update({ status: 'closed', early_closed: true }).eq('id', battle.id).in('status', ['upcoming', 'active', 'voting']),
-        ]);
-        await deleteRoomFn(room.id);
         addToast('ROOM DELETED');
       } else if (isRanked) {
-        // For ranked, advanceToClosed handles ELO + battle close via state machine.
-        // Just give immediate feedback and navigate home.
         addToast('LEFT MATCH');
       } else {
-        const { count: remainingMembers } = await supabase
-          .from('room_members')
-          .select('room_id', { count: 'exact' })
-          .eq('room_id', room.id);
-        // Update current_players count
-        if (remainingMembers > 0) {
-          await supabase.from('rooms').update({ current_players: remainingMembers }).eq('id', room.id);
-        }
-        if (remainingMembers <= 0) {
-          // Last member left — close room + battle, then delete room
-          await Promise.all([
-            room.battle_id ? supabase.from('battles').update({ status: 'closed', early_closed: true }).eq('id', room.battle_id).in('status', ['upcoming', 'active', 'voting']) : null,
-            supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id).in('status', ['locked', 'voting']),
-          ]);
-          await deleteRoomFn(room.id);
-          addToast('ROOM DELETED');
-        } else {
-          addToast('LEFT ROOM');
-        }
+        addToast('LEFT ROOM');
       }
       if (isRanked) refreshProfile();
       navigate('/', { replace: true });
@@ -756,7 +737,7 @@ export default function Battle() {
         {!room?.countdown_started_at && (
         <div className="rdb-panel p-5 flex flex-col items-center gap-3">
 
-          {isOwner && !room?.countdown_started_at && (
+          {isOwner && !room?.countdown_started_at && members.length >= 2 && (
             <button
               className="w-full h-11 rdb-button rdb-button-primary font-mono text-[12px] uppercase font-bold"
               disabled={members.length < 2}
@@ -783,7 +764,16 @@ export default function Battle() {
             <button
               className="h-11 px-6 rdb-button border-rdb-red text-rdb-red font-mono text-[12px] uppercase"
               disabled={leavingRoom}
-              onClick={() => { setLeavingRoom(true); playUiSound('cancel'); leaveLobby(room.id, profile.id).finally(() => { setLeavingRoom(false); }); addToast('LEFT LOBBY'); navigate('/', { replace: true }); }}
+              onClick={() => {
+                setLeavingRoom(true);
+                playUiSound('cancel');
+                const isOwnerLeave = room?.owner_id === profile?.id;
+                const payload = { isRanked: room?.mode === 'ranked', battleId: room?.battle_id || '' };
+                dispatchRoomEvent({ roomId: room.id, eventType: isOwnerLeave ? 'owner_leave' : 'player_leave', payload })
+                  .finally(() => { setLeavingRoom(false); });
+                addToast('LEFT LOBBY');
+                navigate('/', { replace: true });
+              }}
               type="button"
             >
               {leavingRoom ? 'LEAVING...' : 'LEAVE'}
@@ -806,7 +796,7 @@ export default function Battle() {
             <ChallengeReveal
               challenge={room?.challenge}
               endsAt={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : battle?.starts_at}
-              countdownDuration={10}
+              countdownDuration={5}
               battleId={battle?.id}
               roomId={room?.id}
               roomMode={room?.mode}
@@ -912,7 +902,6 @@ export default function Battle() {
                 submissions={submissions}
                 profile={profile}
                 ratings={ratings}
-                descriptions={descriptions}
                 votingStopped={Boolean(myMember?.voting_stopped)}
                 onVoted={async () => {
                   await reloadRatings();
@@ -943,10 +932,16 @@ export default function Battle() {
                   className="rdb-button rdb-button-primary"
                   type="button"
                   onClick={async () => {
-                    if (room?.id && profile?.id) {
-                      await supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id);
-                      const { count } = await supabase.from('room_members').select('room_id', { count: 'exact' }).eq('room_id', room.id);
-                      if (count <= 0) await deleteRoomFn(room.id);
+                    if (room?.id && profile?.id && phase !== 'closed' && battle?.status !== 'closed') {
+                      try {
+                        await dispatchRoomEvent({
+                          roomId: room.id,
+                          eventType: 'player_leave',
+                          payload: { isRanked: room.mode === 'ranked', battleId: room.battle_id || '' },
+                        });
+                      } catch {
+                        // Already left — just navigate
+                      }
                     }
                     navigate('/');
                   }}
@@ -1012,20 +1007,20 @@ export default function Battle() {
                 disabled={leavingRoom}
                 onClick={async () => {
                   playUiSound('cancel');
-                  if (!confirm('PERMANENTLY DELETE THIS ROOM?')) return;
+                  if (!confirm('CLOSE THIS ROOM?')) return;
                   setLeavingRoom(true);
                   try {
                     await deleteRoomFn(room.id);
-                    addToast('ROOM DELETED');
+                    addToast('ROOM CLOSED');
                     navigate('/', { replace: true });
                   } catch (err) {
-                    addToast(err.message || 'DELETE FAILED', 'error');
+                    addToast(err.message || 'CLOSE FAILED', 'error');
                   } finally {
                     setLeavingRoom(false);
                   }
                 }}
               >
-                {leavingRoom ? 'DELETING...' : 'DELETE ROOM'}
+                {leavingRoom ? 'CLOSING...' : 'CLOSE ROOM'}
               </button>
             )}
 
@@ -1118,10 +1113,13 @@ export default function Battle() {
           <section className="rdb-panel p-4">
             <h2 className="rdb-section-title">CHAT</h2>
             <div className="h-56 overflow-y-auto border-y border-rdb-border py-2">
-              {messages.map((message) => (
+              {messages.map((message) => {
+                const isNew = !seenMsgIds.current.has(message.id);
+                if (isNew) seenMsgIds.current.add(message.id);
+                return (
                 <div
                   key={message.id}
-                  className="mb-2 font-mono text-[11px] uppercase text-rdb-muted"
+                  className={`mb-2 font-mono text-[11px] uppercase text-rdb-muted${isNew ? ' chat-msg-new' : ''}`}
                 >
                   <a
                     className={`text-rdb-text hover:underline ${getNameCosmeticClassName(message.profiles)}`}
@@ -1139,7 +1137,8 @@ export default function Battle() {
                   </a>{' '}
                   {message.body}
                 </div>
-              ))}
+              );
+              })}
               {!messages.length && (
                 <div className="font-mono text-[11px] uppercase text-rdb-muted">
                   No chat yet.

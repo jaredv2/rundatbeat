@@ -90,7 +90,15 @@ export default function Profile() {
                 <div className="mt-1 flex items-center justify-center gap-1 font-mono text-[11px] uppercase text-rdb-text sm:justify-start"><Calendar size={12} />JOINED {joined}</div>
                 <div className="mt-5 flex flex-wrap justify-center gap-2 sm:justify-start">
                   <RankBadge tier={profile.rank_tier} />
-                  <span className="inline-flex items-center gap-1 border border-rdb-border px-2 py-1 font-mono text-xs uppercase text-rdb-text"><Trophy size={12} />LVL {profile.level || 1}</span>
+                  <span className="inline-flex items-center gap-1 border border-rdb-border px-2 py-1 font-mono text-xs uppercase text-rdb-text">
+                    <Trophy size={12} />LVL {level}
+                    <span className="ml-1 inline-flex items-center gap-1">
+                      <span className="h-1.5 w-12 overflow-hidden rounded-full bg-rdb-border">
+                        <span className="block h-full rounded-full bg-rdb-orange transition-all" style={{ width: `${Math.min(100, Math.round(levelProgress * 100))}%` }} />
+                      </span>
+                      <span className="text-[10px] text-rdb-muted">{xp - xpCurrent}/{xpNext - xpCurrent}</span>
+                    </span>
+                  </span>
                 </div>
               </div>
             </div>

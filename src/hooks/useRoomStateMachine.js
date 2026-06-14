@@ -12,6 +12,7 @@ function log(tag, ...args) {
 const DEFAULT_VOTING_MINUTES = 3;
 const LOBBY_COUNTDOWN_MS = 5000;
 const TICK_INTERVAL_MS = 3000;
+const POST_BATTLE_CLOSE_DELAY_MS = 5 * 60 * 1000; // 5 minutes after battle closes before room is deleted
 const _closingGuards = new Map();
 
 export function isBattleClosing(battleId) {
@@ -35,6 +36,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
   const timerRef = useRef(null);
   const advancingLobby = useRef(false);
   const closingRef = useRef(false);
+  const battleClosedAtRef = useRef(null);
   const battleRef = useRef(battle);
   const roomRef = useRef(room);
   battleRef.current = battle;
@@ -138,12 +140,33 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
           closingRef.current = true;
           setCalculatingWinner(true);
           try {
-            await advanceToClosed(b.id, r.id, { closeRoom: allStopped });
+            await advanceToClosed(b.id, r.id);
           } finally {
             setCalculatingWinner(false);
             closingRef.current = false;
           }
         }
+      }
+
+      // ── Delayed room close: close room N minutes after battle closes ──
+      if (currentPhase === 'closed' && r && r.status !== 'closed' && r.status !== 'lobby') {
+        if (!battleClosedAtRef.current) {
+          battleClosedAtRef.current = now;
+          log('TICK', 'room close timer started — will close in', POST_BATTLE_CLOSE_DELAY_MS / 1000, 'seconds');
+        }
+        if (now - battleClosedAtRef.current >= POST_BATTLE_CLOSE_DELAY_MS) {
+          log('TICK', 'post-battle delay expired → closing room');
+          await supabase
+            .from('rooms')
+            .update({ status: 'closed', current_players: 0 })
+            .eq('id', r.id)
+            .in('status', ['locked', 'voting']);
+          // Also clean up room_messages before room gets deleted by cleanup
+          await supabase.from('room_messages').delete().eq('room_id', r.id);
+          battleClosedAtRef.current = null;
+        }
+      } else if (currentPhase !== 'closed') {
+        battleClosedAtRef.current = null;
       }
     }, TICK_INTERVAL_MS);
 
@@ -228,7 +251,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
       ]);
       log('FORCE-CLOSE', 'SUCCESS — non-ranked');
     } else {
-      await advanceToClosed(battle.id, room.id, { closeRoom: true });
+      await advanceToClosed(battle.id, room.id);
       log('FORCE-CLOSE', 'SUCCESS — ranked');
     }
   }, [isOwner, battle, room]);
@@ -241,8 +264,8 @@ function derivePhase(battle, room) {
   if (room?.status === 'matchmaking') return 'matchmaking';
   if (!battle) {
     if (room?.status === 'lobby') return 'lobby';
-    // Battle deleted by cleanup (room has no battle_id) — stay closed
-    if ((room?.status === 'locked' || room?.status === 'voting' || room?.status === 'closed') && !room?.battle_id) return 'closed';
+    // Battle deleted or not loaded — if room is locked/voting/closed, stay closed
+    if (room?.status === 'locked' || room?.status === 'voting' || room?.status === 'closed') return 'closed';
     // Battle exists but hasn't loaded yet — treat as upcoming
     return 'upcoming';
   }
@@ -314,13 +337,13 @@ async function advanceToVoting(battleId, roomId, votingMinutes = DEFAULT_VOTING_
   log('ACTIVE→VOTING', 'SUCCESS — DB write took', dt + 'ms', 'voting ends:', votingEndsAt);
 }
 
-async function advanceToClosed(battleId, roomId, { closeRoom = false } = {}) {
+async function advanceToClosed(battleId, roomId) {
   if (_closingGuards.get(battleId)) {
     log('→CLOSED', 'SKIP — already closing battle:', battleId);
     return;
   }
   _closingGuards.set(battleId, true);
-  log('→CLOSED', 'battle:', battleId, 'room:', roomId, 'closeRoom:', closeRoom);
+  log('→CLOSED', 'battle:', battleId, 'room:', roomId);
 
   try {
   const { count: memberCount } = await supabase
@@ -541,16 +564,8 @@ async function advanceToClosed(battleId, roomId, { closeRoom = false } = {}) {
   if (battleRes.error) throw new Error(`advanceToClosed battles: ${battleRes.error.message}`);
   log('→CLOSED', 'battle closed:', battleId, '| DB write took', (Date.now() - tClose) + 'ms');
 
-  // ── Close room only when all players locked voting ──
-  if (closeRoom) {
-    const tRoom = Date.now();
-    await supabase
-      .from('rooms')
-      .update({ status: 'closed' })
-      .eq('id', roomId)
-      .in('status', ['locked', 'voting']);
-    log('→CLOSED', 'room closed:', roomId, '| DB write took', (Date.now() - tRoom) + 'ms');
-  }
+  // ── Room is NOT closed here — the tick timer closes it after POST_BATTLE_CLOSE_DELAY_MS ──
+  // This gives players time to see results and chat before being kicked out.
 
   // ── Delete audio files from storage ──
   try {

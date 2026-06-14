@@ -1,24 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Lock, Unlock } from 'lucide-react';
 import WaveformPlayer from '../audio/WaveformPlayer';
 import { useVoting } from '../../hooks/useVoting';
 import { useUiStore } from '../../store/uiStore';
 import { playUiSound } from '../../lib/sfx';
 
-export default function VotingFeed({ battle, room, submissions, profile, votes = {}, ratings = {}, descriptions = {}, votingStopped = false, onVoted, onStopVoting }) {
+export default function VotingFeed({ battle, room, submissions, profile, votes = {}, ratings = {}, votingStopped = false, onVoted, onStopVoting }) {
   const { castRating, stopVoting } = useVoting();
   const addToast = useUiStore((s) => s.addToast);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [localRatings, setLocalRatings] = useState(ratings);
-  const [localDescriptions, setLocalDescriptions] = useState(descriptions);
   const [voting, setVoting] = useState(false);
+  const votingRef = useRef(false);
   const [togglingLock, setTogglingLock] = useState(false);
 
   useEffect(() => {
     // Only sync from props on initial load or battle change — not after each vote
     if (Object.keys(localRatings).length === 0) setLocalRatings(ratings);
   }, [ratings]);
-  useEffect(() => { setLocalDescriptions(descriptions); }, [descriptions]);
 
   const myId = profile?.id;
   const otherSubmissions = submissions.filter((s) => s.user_id && myId && s.user_id !== myId);
@@ -35,7 +34,8 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
   }
 
   async function handleRate(rating) {
-    if (!current || voting) return;
+    if (!current || votingRef.current) return;
+    votingRef.current = true;
     playUiSound('click');
     const prevRating = localRatings[current.id];
     setLocalRatings((prev) => ({ ...prev, [current.id]: rating }));
@@ -47,7 +47,7 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
         voterId: myId,
         voterProfile: profile,
         rating,
-        description: localDescriptions[current.id] || '',
+        description: '',
       });
       addToast('VOTE CAST');
       onVoted?.();
@@ -56,6 +56,7 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
       addToast(error.message || 'VOTE FAILED', 'error');
     } finally {
       setVoting(false);
+      votingRef.current = false;
     }
   }
 
@@ -120,16 +121,6 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
           </div>
         </div>
 
-        <div className="mt-4">
-          <textarea
-            className="rdb-input min-h-20"
-            placeholder="DESCRIPTION OF YOUR RATING (OPTIONAL)"
-            value={localDescriptions[current.id] || ''}
-            onChange={(e) => {
-              setLocalDescriptions((prev) => ({ ...prev, [current.id]: e.target.value }));
-            }}
-          />
-        </div>
       </div>
 
       <div className="flex items-center justify-between gap-3">

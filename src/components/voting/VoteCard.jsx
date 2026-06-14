@@ -4,9 +4,9 @@ import { formatNumber } from '../../lib/display';
 import { Link } from 'react-router-dom';
 
 const RANK_STYLES = {
-  1: { border: 'border-yellow-500', bg: 'bg-yellow-500/10', label: '🥇 GOLD', labelColor: 'text-yellow-400' },
-  2: { border: 'border-gray-300', bg: 'bg-gray-300/10', label: '🥈 SILVER', labelColor: 'text-gray-300' },
-  3: { border: 'border-amber-600', bg: 'bg-amber-600/10', label: '🥉 BRONZE', labelColor: 'text-amber-500' },
+  1: { border: 'border-2 border-yellow-500', bg: 'bg-yellow-500/10', label: '🥇 GOLD', labelColor: 'text-yellow-400' },
+  2: { border: 'border-2 border-gray-300', bg: 'bg-gray-300/10', label: '🥈 SILVER', labelColor: 'text-gray-300' },
+  3: { border: 'border-2 border-amber-600', bg: 'bg-amber-600/10', label: '🥉 BRONZE', labelColor: 'text-amber-500' },
 };
 
 function VoteCardInner({ submission, rank }) {
@@ -20,7 +20,6 @@ function VoteCardInner({ submission, rank }) {
         </div>
         {style && <span className={`font-mono text-sm ${style.labelColor}`}>{style.label}</span>}
       </div>
-      <p className="my-3 text-rdb-muted">{submission.description}</p>
       <WaveformPlayer url={submission.audio_url} />
       <div className="mt-3 font-mono text-rdb-orange">{formatNumber(submission.rating_total ?? submission.vote_count ?? 0)} SCORE</div>
     </div>

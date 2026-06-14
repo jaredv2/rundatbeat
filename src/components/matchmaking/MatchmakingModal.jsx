@@ -244,7 +244,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-semibold text-rdb-text">Ranked Queue</div>
-                  <div className="mt-1 text-xs uppercase text-rdb-text/50">{tier} tier • all tiers welcome</div>
+                  <div className="mt-1 text-xs uppercase text-rdb-text/50">{tier} tier</div>
                 </div>
               </div>
               <div className="mt-4 font-mono text-[11px] uppercase text-rdb-text/40 text-center py-8">
@@ -301,22 +301,60 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
             </div>
             <div className="rounded-lg border border-rdb-border bg-rdb-bg/70 p-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-rdb-text"><Wand2 size={15} />Create Room</div>
-              <div className="mt-3 grid gap-2">
+              <div className="mt-3 grid gap-3">
                 <LabeledField icon={<Users size={13} />} label="Name">
                   <input className="rdb-input" value={roomSetup.name} onChange={(event) => updateRoomSetup('name', event.target.value)} />
                 </LabeledField>
-                <div className="grid grid-cols-2 gap-2">
-                  <LabeledField icon={<Timer size={13} />} label="Battle Min">
-                    <input className="rdb-input" min="1" type="number" value={roomSetup.battleMinutes} onChange={(event) => updateRoomSetup('battleMinutes', Number(event.target.value))} />
-                  </LabeledField>
-                  <LabeledField icon={<Music size={13} />} label="Song Length Sec">
-                    <input className="rdb-input" min="15" type="number" value={roomSetup.songLengthSeconds} onChange={(event) => updateRoomSetup('songLengthSeconds', Number(event.target.value))} />
-                  </LabeledField>
+
+                <div className="border border-rdb-border bg-rdb-bg/50 p-3">
+                  <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Timer size={13} />Battle Time: {roomSetup.battleMinutes} min</span>
+                  <input
+                    className="w-full accent-rdb-orange"
+                    type="range"
+                    min="1"
+                    max="300"
+                    step="5"
+                    value={roomSetup.battleMinutes}
+                    onChange={(event) => updateRoomSetup('battleMinutes', Number(event.target.value))}
+                  />
+                  <div className="flex justify-between font-mono text-[9px] uppercase text-rdb-text/40">
+                    <span>1 min</span><span>5 hrs</span>
+                  </div>
                 </div>
-                <LabeledField icon={<Timer size={13} />} label="Voting Min">
-                  <input className="rdb-input" min="1" max="60" type="number" value={roomSetup.votingMinutes} onChange={(event) => updateRoomSetup('votingMinutes', Number(event.target.value))} />
-                </LabeledField>
-                <div className="border border-rdb-border bg-rdb-bg/50 p-2">
+
+                <div className="border border-rdb-border bg-rdb-bg/50 p-3">
+                  <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Timer size={13} />Voting Time: {roomSetup.votingMinutes} min</span>
+                  <input
+                    className="w-full accent-rdb-orange"
+                    type="range"
+                    min="1"
+                    max="15"
+                    step="1"
+                    value={roomSetup.votingMinutes}
+                    onChange={(event) => updateRoomSetup('votingMinutes', Number(event.target.value))}
+                  />
+                  <div className="flex justify-between font-mono text-[9px] uppercase text-rdb-text/40">
+                    <span>1 min</span><span>15 min</span>
+                  </div>
+                </div>
+
+                <div className="border border-rdb-border bg-rdb-bg/50 p-3">
+                  <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Music size={13} />Song Length: {roomSetup.songLengthSeconds >= 600 ? '∞' : `${roomSetup.songLengthSeconds}s`}</span>
+                  <input
+                    className="w-full accent-rdb-orange"
+                    type="range"
+                    min="15"
+                    max="600"
+                    step="15"
+                    value={Math.min(roomSetup.songLengthSeconds, 600)}
+                    onChange={(event) => updateRoomSetup('songLengthSeconds', Number(event.target.value))}
+                  />
+                  <div className="flex justify-between font-mono text-[9px] uppercase text-rdb-text/40">
+                    <span>15s</span><span>∞</span>
+                  </div>
+                </div>
+
+                <div className="border border-rdb-border bg-rdb-bg/50 p-3">
                   <span className="mb-1 flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Users size={13} />Max Players: {roomSetup.maxPlayers}</span>
                   <input
                     className="w-full accent-rdb-orange"
@@ -330,6 +368,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                     <span>2</span><span>10</span>
                   </div>
                 </div>
+
                 <div className="flex gap-4 mt-1">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -360,9 +399,9 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
 function normalizeRoomSetup(setup) {
   return {
     name: String(setup.name || 'PRIVATE STUDIO').trim().slice(0, 40).toUpperCase(),
-    battleMinutes: clamp(Number(setup.battleMinutes), 1, Number.MAX_SAFE_INTEGER),
+    battleMinutes: clamp(Number(setup.battleMinutes), 1, 300),
     songLengthSeconds: clamp(Number(setup.songLengthSeconds), 15, 10000),
-    votingMinutes: clamp(Number(setup.votingMinutes), 1, 60),
+    votingMinutes: clamp(Number(setup.votingMinutes), 1, 15),
     maxPlayers: clamp(Number(setup.maxPlayers), 2, 10),
   };
 }

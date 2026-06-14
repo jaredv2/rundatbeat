@@ -144,14 +144,20 @@ export async function advanceLobbyToActive(roomId) {
 
     log('LOBBY→ACTIVE', 'SUCCESS — room locked, battle linked:', battle.id);
 
-    // Generate challenge AFTER room is locked — only the winner of the optimistic lock generates
-    // This ensures all players get the same sample + instructions
+    // Generate challenge AFTER room is locked — only the room owner generates
+    // The edge function validates ownership, but this avoids wasted API calls on non-owner clients
     if (!challengeAlreadyGenerated) {
-      try {
-        await generateCustomRoomChallenge(roomId);
-        log('LOBBY→ACTIVE', 'challenge generated for room:', roomId);
-      } catch (err) {
-        log('LOBBY→ACTIVE', 'challenge generation failed:', err.message);
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: roomRow } = await supabase.from('rooms').select('owner_id').eq('id', roomId).maybeSingle();
+      if (roomRow?.owner_id === user?.id) {
+        try {
+          await generateCustomRoomChallenge(roomId);
+          log('LOBBY→ACTIVE', 'challenge generated for room:', roomId);
+        } catch (err) {
+          log('LOBBY→ACTIVE', 'challenge generation failed:', err.message);
+        }
+      } else {
+        log('LOBBY→ACTIVE', 'skipped challenge generation — not owner');
       }
     }
 
@@ -195,6 +201,13 @@ export async function generateCustomRoomChallenge(roomId) {
   const restrictionsText = flattenRestrictions(aiJson.restrictions) || aiJson.restrictions_text || '';
   challengePayload.instructions = aiJson.instruction || '';
   challengePayload.restrictionsList = restrictionsText;
+  challengePayload.title = aiJson.title || challengePayload.title;
+  challengePayload.mood = aiJson.flavor_text || aiJson.mood || '';
+  challengePayload.flavor_text = aiJson.flavor_text || '';
+
+  // Generate instruction genre once — all clients read from challenge
+  const BEAT_GENRES = ['TRAP', 'HIPHOP', 'RAGE', 'TDF', 'JERSEY CLUB', 'DRILL', 'HOODTRAP'];
+  challengePayload.instructionGenre = BEAT_GENRES[Math.floor(Math.random() * BEAT_GENRES.length)];
 
   // Preserve room settings from existing challenge
   const roomChallenge = existingRoom?.challenge;
@@ -206,22 +219,11 @@ export async function generateCustomRoomChallenge(roomId) {
     }
   }
 
-  // Update room with challenge
-  await supabase.from('rooms').update({ challenge: challengePayload }).eq('id', roomId);
+  // Dispatch challenge_ready event — server writes to room + battle atomically
+  const { dispatchRoomEvent } = await import('../hooks/useRoomEvents');
+  await dispatchRoomEvent({ roomId, eventType: 'challenge_ready', payload: { challenge: challengePayload } });
 
-  // Update battle with AI content
-  const { data: room } = await supabase.from('rooms').select('battle_id').eq('id', roomId).maybeSingle();
-  if (room?.battle_id) {
-    await supabase.from('battles').update({
-      title: aiJson.title || challengePayload.title,
-      prompt_text: aiJson.instruction || '',
-      genre: challengePayload.genre,
-      bpm: challengePayload.bpm,
-      mood: aiJson.flavor_text || aiJson.mood || '',
-      restrictions: restrictionsText,
-      flavor_text: aiJson.flavor_text || '',
-    }).eq('id', room.battle_id);
-  }
+  return challengePayload;
 
   return challengePayload;
 }
@@ -270,40 +272,9 @@ export async function generateSoloChallenge(roomId, difficulty = 'medium') {
 
 export async function joinRoom(roomId, userId) {
   log('JOIN', 'user:', userId, 'room:', roomId);
-  const { data: room } = await supabase
-    .from('rooms')
-    .select('status, max_players, current_players, mode')
-    .eq('id', roomId)
-    .maybeSingle();
-
-  if (!room) throw new Error('ROOM NOT FOUND');
-  if (room.status !== 'lobby') throw new Error('ROOM IS NOT IN LOBBY');
-  if (room.mode === 'ranked') throw new Error('CANNOT JOIN RANKED THIS WAY');
-
-  const { count } = await supabase
-    .from('room_members')
-    .select('room_id', { count: 'exact' })
-    .eq('room_id', roomId);
-
-  if (count >= (room.max_players || 4)) throw new Error('ROOM IS FULL');
-
-  const { error } = await supabase
-    .from('room_members')
-    .insert({ room_id: roomId, user_id: userId, role: 'member', is_ready: false });
-
-  if (error) {
-    if (error.code === '23505') {
-      log('JOIN', 'already a member (duplicate key)');
-      return;
-    }
-    throw error;
-  }
-
-  log('JOIN', 'SUCCESS — player added, count:', (count || 0) + 1);
-  await supabase
-    .from('rooms')
-    .update({ current_players: (count || 0) + 1 })
-    .eq('id', roomId);
+  const { dispatchRoomEvent } = await import('../hooks/useRoomEvents');
+  await dispatchRoomEvent({ roomId, eventType: 'player_join', payload: {} });
+  log('JOIN', 'SUCCESS');
 }
 
 export async function kickPlayer(roomId, hostId, targetUserId) {

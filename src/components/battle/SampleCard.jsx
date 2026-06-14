@@ -1,11 +1,8 @@
 import { ClipboardCopy, ExternalLink, Music } from 'lucide-react';
-import { useMemo, useState } from 'react';
-
-const BEAT_GENRES = ['TRAP', 'HIPHOP', 'RAGE', 'TDF', 'JERSEY CLUB', 'DRILL', 'HOODTRAP'];
+import { useState } from 'react';
 
 export default function SampleCard({ challenge, phase, room }) {
   const [copied, setCopied] = useState(false);
-  const instructionGenre = useMemo(() => BEAT_GENRES[Math.floor(Math.random() * BEAT_GENRES.length)], []);
   if (!challenge) return null;
 
   const isVoting = phase === 'voting';
@@ -40,7 +37,7 @@ export default function SampleCard({ challenge, phase, room }) {
       )}
 
       {challenge.uploader && (
-        <p className="mt-4 font-mono text-[11px] uppercase text-rdb-muted">
+        <p className="mt-4 font-mono text-sm font-bold uppercase text-rdb-text">
           SAMPLE THIS FROM {challenge.uploader}
         </p>
       )}
@@ -97,7 +94,7 @@ export default function SampleCard({ challenge, phase, room }) {
       <div className="mt-3 rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-3">
         <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>
         <p className="font-mono text-sm uppercase text-rdb-text leading-relaxed">
-          MAKE A {instructionGenre} BEAT FROM THIS SAMPLE
+          MAKE A {challenge.instructionGenre || 'TRAP'} BEAT FROM THIS SAMPLE
         </p>
       </div>
 

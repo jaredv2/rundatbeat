@@ -23,7 +23,7 @@ function useCountdownFrom(endsAt) {
   return remaining;
 }
 
-export default function ChallengeReveal({ challenge, endsAt, countdownDuration = 10, hideChallenge, battleId, roomId, roomMode, difficulty }) {
+export default function ChallengeReveal({ challenge, endsAt, countdownDuration = 5, hideChallenge, battleId, roomId, roomMode, difficulty }) {
   // Compute our own deadline on mount — ignore parent endsAt if it's in the past or too short
   const effectiveEndsAt = useMemo(() => {
     const now = Date.now();

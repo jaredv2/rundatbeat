@@ -917,6 +917,15 @@ button {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes chat-msg-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.chat-msg-new {
+  animation: chat-msg-in 0.25s ease-out both;
+}
+
 /* ── Responsive ─────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
   body {
