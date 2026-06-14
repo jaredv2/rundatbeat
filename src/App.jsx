@@ -206,7 +206,7 @@ export default function App() {
       </div>
 
       {user && <FriendsDock />}
-      <Footer />
+      {!hideNav && <Footer />}
       <ToastNotification />
     </div>
   );
