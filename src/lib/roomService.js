@@ -225,8 +225,6 @@ export async function generateCustomRoomChallenge(roomId) {
   await dispatchRoomEvent({ roomId, eventType: 'challenge_ready', payload: { challenge: challengePayload } });
 
   return challengePayload;
-
-  return challengePayload;
 }
 
 // Fetch sample + generate AI challenge for solo session (called during challenge reveal)
@@ -341,16 +339,13 @@ export async function leaveLobby(roomId, userId) {
     .eq('id', roomId)
     .maybeSingle();
 
-  const isOwner = room?.owner_id === userId;
+    const isOwner = room?.owner_id === userId;
 
   if (isOwner) {
-    log('LEAVE-LOBBY', 'owner leaving — closing room');
-    await supabase.from('room_members').delete().eq('room_id', roomId);
-    if (room.status === 'closed') {
-      await deleteRoom(roomId);
-    } else {
-      await supabase.from('rooms').update({ status: 'closed', current_players: 0 }).eq('id', roomId);
-    }
+    log('LEAVE-LOBBY', 'owner leaving — dispatching owner_leave');
+    const { dispatchRoomEvent } = await import('../hooks/useRoomEvents');
+    await dispatchRoomEvent({ roomId, eventType: 'owner_leave', payload: {} });
+    return;
   } else {
     await supabase
       .from('room_members')

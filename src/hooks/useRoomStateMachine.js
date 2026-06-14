@@ -13,6 +13,7 @@ function log(tag, ...args) {
 const DEFAULT_VOTING_MINUTES = 3;
 const LOBBY_COUNTDOWN_MS = 5000;
 const TICK_INTERVAL_MS = 3000;
+const POST_VOTING_CLOSE_DELAY_MS = 5000; // 5 seconds after voting ends before advanceToClosed
 const POST_BATTLE_CLOSE_DELAY_MS = 5 * 60 * 1000; // 5 minutes after battle closes before room is deleted
 const _closingGuards = new Map();
 
@@ -31,8 +32,8 @@ export function clearBattleLeaving(battleId) {
 }
 
 export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
-  const [phase, setPhase]           = useState(() => derivePhase(battle, room));
-  const [phaseEndsAt, setPhaseEndsAt] = useState(() => phaseEndTimestamp(derivePhase(battle, room), battle, room));
+  const [phase, setPhase]           = useState(() => derivePhase(battle, room, !!battle));
+  const [phaseEndsAt, setPhaseEndsAt] = useState(() => phaseEndTimestamp(derivePhase(battle, room, !!battle), battle, room));
   const [calculatingWinner, setCalculatingWinner] = useState(false);
   const timerRef = useRef(null);
   const advancingLobby = useRef(false);
@@ -40,14 +41,16 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
   const battleClosedAtRef = useRef(null);
   const battleRef = useRef(battle);
   const roomRef = useRef(room);
+  const battleWasLoadedRef = useRef(!!battle);
   battleRef.current = battle;
   roomRef.current = room;
+  if (battle) battleWasLoadedRef.current = true;
 
   const isOwner = Boolean(profile?.id && (room?.owner_id === profile.id || room?.host_id === profile.id));
   const isSolo  = room?.mode === 'solo';
 
   useEffect(() => {
-    const nextPhase = derivePhase(battle, room);
+    const nextPhase = derivePhase(battle, room, battleWasLoadedRef.current);
     log('PHASE', '→', nextPhase, '| battle:', battle?.status, '| room:', room?.status, '| countdown:', room?.countdown_started_at ? 'yes' : 'no');
     setPhase(nextPhase);
     setPhaseEndsAt(phaseEndTimestamp(nextPhase, battle, room));
@@ -62,7 +65,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
       const now = Date.now();
       const b = battleRef.current;
       const r = roomRef.current;
-      const currentPhase = derivePhase(b, r);
+      const currentPhase = derivePhase(b, r, battleWasLoadedRef.current);
 
       if (!isSolo && r?.mode === 'ranked' && r?.owner_id && r.owner_id !== profile?.id) {
         const { data: ownerMember } = await supabase
@@ -73,7 +76,6 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
           .maybeSingle();
         if (!ownerMember) {
           await supabase.from('rooms').update({ owner_id: null }).eq('id', r.id);
-          return;
         }
       }
 
@@ -137,9 +139,12 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         const allStopped = await allPlayersStoppedVoting(r?.id);
 
         if (!closingRef.current && (allStopped || (closedAt && now >= closedAt))) {
-          log('TICK', 'voting ended — allStopped:', allStopped, '→ advanceToClosed');
           closingRef.current = true;
           setCalculatingWinner(true);
+          log('TICK', 'voting ended — allStopped:', allStopped, '→ waiting', POST_VOTING_CLOSE_DELAY_MS + 'ms');
+          // Grace period so users see the transition before results
+          await new Promise(r => setTimeout(r, POST_VOTING_CLOSE_DELAY_MS));
+          log('TICK', 'post-voting delay expired → advanceToClosed');
           try {
             await advanceToClosed(b.id, r.id);
           } finally {
@@ -161,7 +166,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
             .from('rooms')
             .update({ status: 'closed', current_players: 0 })
             .eq('id', r.id)
-            .in('status', ['locked', 'voting']);
+            .in('status', ['locked', 'voting', 'open']);
           // Also clean up room_messages before room gets deleted by cleanup
           await supabase.from('room_messages').delete().eq('room_id', r.id);
           battleClosedAtRef.current = null;
@@ -194,7 +199,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
           else if (rs === 'voting') nextPhase = 'voting';
           else if (rs === 'lobby') nextPhase = 'lobby';
           else if (rs === 'matchmaking') nextPhase = 'matchmaking';
-          else nextPhase = derivePhase(b, payload.new);
+          else nextPhase = derivePhase(b, payload.new, battleWasLoadedRef.current);
           log('RT:ROOM', 'status:', rs, '→ phase:', nextPhase);
           setPhase(nextPhase);
           setPhaseEndsAt(phaseEndTimestamp(nextPhase, b, payload.new));
@@ -240,14 +245,18 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
   return { phase, phaseEndsAt, forceStart, forceClose, isOwner, isSolo, calculatingWinner };
 }
 
-function derivePhase(battle, room) {
+function derivePhase(battle, room, battleWasLoaded = false) {
   if (room?.status === 'lobby') return 'lobby';
   if (room?.status === 'matchmaking') return 'matchmaking';
   if (!battle) {
     if (room?.status === 'lobby') return 'lobby';
-    // Battle deleted or not loaded — if room is locked/voting/closed, stay closed
-    if (room?.status === 'locked' || room?.status === 'voting' || room?.status === 'closed') return 'closed';
-    // Battle exists but hasn't loaded yet — treat as upcoming
+    // Room locked but battle not loaded yet — optimistic (data arrives via realtime)
+    if (room?.status === 'locked') return 'upcoming';
+    // Room voting but battle is gone — if we ever had a battle, it was deleted
+    if (room?.status === 'voting' && battleWasLoaded) return 'closed';
+    if (room?.status === 'voting') return 'voting'; // optimistic — battle data on its way
+    if (room?.status === 'closed') return 'closed';
+    // No room data yet — loading state
     return 'upcoming';
   }
   const status = battle.status;
@@ -286,7 +295,7 @@ async function advanceToActive(battleId, roomId, isSolo = false) {
       .from('rooms')
       .update({ status: 'locked' })
       .eq('id', roomId)
-      .in('status', ['lobby', 'open', 'locked']),
+      .eq('status', 'lobby'),
   ]);
   const dt = Date.now() - t0;
   if (battleRes.error) throw new Error(`advanceToActive battles: ${battleRes.error.message}`);
@@ -338,6 +347,30 @@ async function advanceToClosed(battleId, roomId) {
     .select('mode, early_closed, winner_id')
     .eq('id', battleId)
     .maybeSingle();
+
+  // ── Refresh rating totals from votes before ELO computation ──
+  try {
+    const { data: allVotes } = await supabase
+      .from('votes')
+      .select('submission_id, rating, weight')
+      .eq('battle_id', battleId);
+    if (allVotes?.length) {
+      const voteAgg = new Map();
+      for (const v of allVotes) {
+        const prev = voteAgg.get(v.submission_id) || { total: 0, count: 0 };
+        voteAgg.set(v.submission_id, {
+          total: prev.total + (v.rating || 0) * (v.weight || 1),
+          count: prev.count + 1,
+        });
+      }
+      for (const [subId, agg] of voteAgg) {
+        await supabase.from('submissions').update({ rating_total: agg.total, vote_count: agg.count }).eq('id', subId);
+      }
+      log('→CLOSED', 'refreshed', voteAgg.size, 'submission ratings from votes');
+    }
+  } catch (err) {
+    log('→CLOSED', 'rating refresh error (non-fatal):', err.message);
+  }
 
   // ── Compute ELO and record wins/losses BEFORE closing ──
   if (battle?.mode === 'ranked' && !battle.winner_id) {
@@ -583,6 +616,7 @@ async function allPlayersStoppedVoting(roomId) {
     .from('room_members')
     .select('voting_stopped')
     .eq('room_id', roomId);
-  if (error || !members?.length || members.length < 2) return false;
+  if (error || !members?.length) return false;
+  if (members.length < 2) return members.every((m) => m.voting_stopped);
   return members.every((m) => m.voting_stopped);
 }

@@ -156,28 +156,6 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
             </div>
           </div>
 
-          {/* Challenge info — only show after countdown ends */}
-          {!hideChallenge && revealed && challenge && (
-            <div className="space-y-2">
-              {challenge.genre && (
-                <div className="inline-flex items-center gap-1.5 rounded bg-rdb-orange/15 px-3 py-1">
-                  <Music size={11} className="text-rdb-orange" />
-                  <span className="font-mono text-[10px] uppercase text-rdb-orange">{challenge.genre}</span>
-                </div>
-              )}
-              {challenge.title && (
-                <h2 className="font-mono text-xl font-bold uppercase text-rdb-text">
-                  {challenge.title}
-                </h2>
-              )}
-              {challenge.bpm && (
-                <p className="font-mono text-[11px] uppercase text-rdb-muted">
-                  {challenge.bpm} BPM {challenge.key ? `• KEY: ${challenge.key}` : ''}
-                </p>
-              )}
-            </div>
-          )}
-
           {/* Generating indicator while AI runs */}
           {!hideChallenge && !challenge && !revealed && (
             <div className="flex items-center justify-center gap-2">

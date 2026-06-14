@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Lock, Unlock } from 'lucide-react';
 import WaveformPlayer from '../audio/WaveformPlayer';
 import { useVoting } from '../../hooks/useVoting';
@@ -20,7 +20,16 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
   }, [ratings]);
 
   const myId = profile?.id;
-  const otherSubmissions = submissions.filter((s) => s.user_id && myId && s.user_id !== myId);
+  const otherSubmissions = useMemo(() => {
+    const filtered = submissions.filter((s) => s.user_id && myId && s.user_id !== myId);
+    // Deterministic shuffle based on battle id so order is consistent but doesn't leak rank
+    const seed = battle?.id ? [...battle.id].reduce((a, c) => a + c.charCodeAt(0), 0) : 0;
+    return [...filtered].sort((a, b) => {
+      const ha = [...(a.id || '')].reduce((s, c) => s + c.charCodeAt(0), 0) + seed;
+      const hb = [...(b.id || '')].reduce((s, c) => s + c.charCodeAt(0), 0) + seed;
+      return ha - hb;
+    });
+  }, [submissions, myId, battle?.id]);
   const current = otherSubmissions[currentIndex];
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < otherSubmissions.length - 1;

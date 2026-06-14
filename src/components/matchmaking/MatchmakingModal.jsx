@@ -244,7 +244,6 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-semibold text-rdb-text">Ranked Queue</div>
-                  <div className="mt-1 text-xs uppercase text-rdb-text/50">{tier} tier</div>
                 </div>
               </div>
               <div className="mt-4 font-mono text-[11px] uppercase text-rdb-text/40 text-center py-8">
@@ -275,7 +274,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                       <div className="flex items-center justify-between gap-2">
                         <span className={`font-mono text-[11px] uppercase ${isFull ? 'text-rdb-red' : 'text-rdb-text/50'}`}>{memberCount}/{room.max_players || 4}{isFull ? ' FULL' : ''}</span>
                         <div className="flex gap-2">
-                          {!isOwner && !isFull && (
+                          {!isOwner && !isFull && room.status === 'lobby' && (
                             <button className="rdb-button rdb-button-primary" disabled={status === 'busy'} type="button" onClick={async () => {
                               playUiSound('click');
                               navigate(`/battle/${room.battle_id || room.id}`);

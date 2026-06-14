@@ -132,7 +132,7 @@ export default function Battle() {
   const soloDifficulty = searchParams.get('difficulty') || 'medium';
 
   // useBattle is fully realtime — no polling anywhere below
-  const { battle, submissions, room, members, messages, loading, refresh, refreshRoomData } =
+  const { battle, submissions, room, members, messages, loading, refresh, refreshRoomData, refreshSubmissions } =
     useBattle(id);
 
   const [ratings, setRatings]       = useState({});
@@ -152,6 +152,7 @@ export default function Battle() {
   const [rankUpNewLevel, setRankUpNewLevel] = useState(1);
   const [countdown, setCountdown] = useState(null);
   const [lobbyTransitioning, setLobbyTransitioning] = useState(false);
+  const [showGoHome, setShowGoHome] = useState(false);
   const chatEndRef = useRef(null);
   const seenMsgIds = useRef(new Set());
   const selfLeaving = useRef(false);
@@ -375,6 +376,9 @@ export default function Battle() {
       wasClosed.current = true;
       devLog('[Battle] BATTLE CLOSED', { winnerId: battle?.winner_id, myId: profile.id, isRanked, isSolo });
 
+      // Refresh submissions in React state if empty
+      if (!submissions.length && battle?.id) refreshSubmissions();
+
       async function checkAndShowModal() {
         // Submissions may not be loaded yet — fetch directly
         let subs = submissions;
@@ -430,6 +434,13 @@ export default function Battle() {
       checkAndShowModal();
     }
   }, [phase, loading, profile?.id]);
+
+  // ── Show "go home" card 30s after battle closes ─────────────────────────
+  useEffect(() => {
+    if (phase !== 'closed') { setShowGoHome(false); return; }
+    const timer = setTimeout(() => setShowGoHome(true), 30000);
+    return () => clearTimeout(timer);
+  }, [phase]);
 
   // ── Leave confirmation for ranked match during submission ──────────────────
   const isRankedMatch = room?.mode === 'ranked' && !isSolo;
@@ -817,7 +828,7 @@ export default function Battle() {
             />
           ) : phase === 'closed' ? (
             <></>
-          ) : room?.challenge && (phase === 'active' || phase === 'voting') ? (
+          ) : room?.challenge && phase === 'active' ? (
             <SampleCard challenge={room.challenge} phase={phase} room={room} />
           ) : (
             <BattlePrompt battle={battle} />
@@ -907,8 +918,8 @@ export default function Battle() {
             </div>
           )}
 
-          {/* ── Voting feed — gated to voting phase ── */}
-          {isVotingPhase && (
+          {/* ── Voting feed — gated to voting phase, hidden while calculating ── */}
+          {isVotingPhase && !calculatingWinner && (
             <div id="voting-feed">
               <VotingFeed
                 battle={battle}
@@ -935,35 +946,22 @@ export default function Battle() {
             </div>
           )}
 
-          {phase === 'closed' && !isSolo && (
-            submissions.length > 0 ? (
-              <BattleResults submissions={submissions} currentUserId={profile?.id} />
-            ) : (
-              <div className="rdb-panel p-8 text-center space-y-4">
-                <p className="font-mono text-sm uppercase text-rdb-muted">This battle has ended.</p>
-                <p className="font-mono text-[11px] uppercase text-rdb-muted">Time to go home.</p>
-                <button
-                  className="rdb-button rdb-button-primary"
-                  type="button"
-                  onClick={async () => {
-                    if (room?.id && profile?.id && phase !== 'closed' && battle?.status !== 'closed') {
-                      try {
-                        await dispatchRoomEvent({
-                          roomId: room.id,
-                          eventType: 'player_leave',
-                          payload: { isRanked: room.mode === 'ranked', battleId: room.battle_id || '' },
-                        });
-                      } catch {
-                        // Already left — just navigate
-                      }
-                    }
-                    navigate('/');
-                  }}
-                >
-                  GO HOME
-                </button>
-              </div>
-            )
+          {phase === 'closed' && !isSolo && !showGoHome && (
+            <BattleResults submissions={submissions} currentUserId={profile?.id} />
+          )}
+
+          {phase === 'closed' && !isSolo && showGoHome && (
+            <div className="rdb-panel p-8 text-center space-y-4">
+              <p className="font-mono text-sm uppercase text-rdb-muted">This battle has ended.</p>
+              <p className="font-mono text-[11px] uppercase text-rdb-muted">Time to go home.</p>
+              <button
+                className="rdb-button rdb-button-primary"
+                type="button"
+                onClick={() => navigate('/')}
+              >
+                GO HOME
+              </button>
+            </div>
           )}
 
         </section>

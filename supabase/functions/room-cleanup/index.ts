@@ -208,7 +208,7 @@ Deno.serve(async () => {
     }
   }
 
-  // ── Phase 4: Delete closed battles ─────────────────────────────────────
+  // ── Phase 4: Delete closed battles (only if no active room references them) ──
   // Cascade handles submissions → votes
 
   const { data: deadBattles } = await supabase
@@ -221,13 +221,27 @@ Deno.serve(async () => {
 
   if (deadBattles?.length) {
     const battleIds = deadBattles.map((b: { id: string }) => b.id);
-    const { count, error } = await supabase
-      .from("battles")
-      .delete({ count: "exact" })
-      .in("id", battleIds);
-    stats.deleted_battles = count ?? 0;
-    if (error) log(`phase4: error: ${error.message}`);
-    else log(`phase4: deleted ${stats.deleted_battles} battles (+ cascade submissions/votes)`);
+
+    // Don't delete battles still referenced by active rooms
+    const { data: activeRooms } = await supabase
+      .from("rooms")
+      .select("battle_id")
+      .in("battle_id", battleIds)
+      .in("status", ["locked", "voting", "lobby"]);
+    const keepBattleIds = new Set((activeRooms || []).map(r => r.battle_id));
+    const safeToDelete = battleIds.filter(id => !keepBattleIds.has(id));
+
+    if (safeToDelete.length) {
+      const { count, error } = await supabase
+        .from("battles")
+        .delete({ count: "exact" })
+        .in("id", safeToDelete);
+      stats.deleted_battles = count ?? 0;
+      if (error) log(`phase4: error: ${error.message}`);
+      else log(`phase4: deleted ${stats.deleted_battles} battles (+ cascade submissions/votes)`);
+    } else {
+      log(`phase4: all ${battleIds.length} battles still referenced by active rooms — skipped`);
+    }
   }
 
   const elapsed = Date.now() - start;

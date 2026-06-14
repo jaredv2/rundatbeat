@@ -5,6 +5,7 @@ export function useVoting() {
     if (!supabase) throw new Error('Supabase not initialized');
     if (!voterId) throw new Error('Must be logged in to vote');
     if (submission.user_id === voterId) throw new Error('YOU CANNOT VOTE YOUR OWN SUBMISSION');
+    if (typeof rating !== 'number' || rating < 0 || rating > 10) throw new Error('Rating must be between 0 and 10');
 
     const weight = 1;
 
