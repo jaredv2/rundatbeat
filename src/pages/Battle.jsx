@@ -653,8 +653,26 @@ export default function Battle() {
               </p>
             </div>
           )
+        ) : phase === 'closed' ? (
+          <div className="rdb-panel p-8 text-center space-y-4">
+            <div className="font-mono text-lg font-bold uppercase text-rdb-orange">SESSION ENDED</div>
+            <p className="font-mono text-[11px] uppercase text-rdb-muted">Great run. Time to head back.</p>
+            <button
+              className="rdb-button rdb-button-primary"
+              type="button"
+              onClick={() => navigate('/')}
+            >
+              GO HOME
+            </button>
+          </div>
         ) : room?.challenge && phase === 'active' ? (
-          <SampleCard challenge={room.challenge} phase={phase} room={room} />
+          <>
+            <SampleCard challenge={room.challenge} phase={phase} room={room} />
+            <PhaseTimer
+              label="SESSION"
+              target={battle.voting_ends_at || battle.ends_at}
+            />
+          </>
         ) : phase === 'voting' ? (
           <></>
         ) : (
@@ -662,16 +680,18 @@ export default function Battle() {
         )}
 
         {/* ── Leave button ── */}
-        <div className="text-center">
-          <button
-            className="rdb-button border-rdb-red text-rdb-red"
-            type="button"
-            disabled={leavingRoom}
-            onClick={leaveRoom}
-          >
-            {leavingRoom ? 'LEAVING...' : 'LEAVE'}
-          </button>
-        </div>
+        {phase !== 'closed' && (
+          <div className="text-center">
+            <button
+              className="rdb-button border-rdb-red text-rdb-red"
+              type="button"
+              disabled={leavingRoom}
+              onClick={leaveRoom}
+            >
+              {leavingRoom ? 'LEAVING...' : 'LEAVE'}
+            </button>
+          </div>
+        )}
       </div>
     </main>
   ) : phase === 'lobby' && !isSolo ? (
