@@ -18,7 +18,7 @@ import PremiumGate from '../components/battle/PremiumGate';
 import SubmitBeat from '../components/battle/SubmitBeat';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import Spinner from '../components/ui/Spinner';
-import WinModal from '../components/ui/WinModal';
+import RankUpModal from '../components/ui/RankUpModal';
 import VotingFeed from '../components/voting/VotingFeed';
 import ChallengeReveal from '../components/battle/ChallengeReveal';
 import WaveformPlayer from '../components/audio/WaveformPlayer';
@@ -31,9 +31,8 @@ import {
   getNameGradientStyle,
   getNameplateEmoji,
 } from '../lib/display';
-import { DEFAULT_ELO, tierFromElo } from '../lib/elo';
-import { toggleReady, leaveLobby, startCountdown, deleteRoom as deleteRoomFn } from '../lib/roomService';
 import { supabase } from '../lib/supabase';
+import { toggleReady, leaveLobby, startCountdown, deleteRoom as deleteRoomFn } from '../lib/roomService';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
 import { playUiSound } from '../lib/sfx';
@@ -143,10 +142,12 @@ export default function Battle() {
   const [leavingRoom, setLeavingRoom] = useState(false);
   const [showDeleteRoomModal, setShowDeleteRoomModal] = useState(false);
   const [showEarlyLeaveModal, setShowEarlyLeaveModal] = useState(false);
-  const [showWinModal, setShowWinModal] = useState(false);
-  const [winEloGain, setWinEloGain] = useState(null);
-  const [winOldTier, setWinOldTier] = useState(null);
-  const [winNewTier, setWinNewTier] = useState(null);
+  const [showRankUpModal, setShowRankUpModal] = useState(false);
+  const [rankUpXpGain, setRankUpXpGain] = useState(0);
+  const [rankUpOldXp, setRankUpOldXp] = useState(0);
+  const [rankUpNewXp, setRankUpNewXp] = useState(0);
+  const [rankUpOldLevel, setRankUpOldLevel] = useState(1);
+  const [rankUpNewLevel, setRankUpNewLevel] = useState(1);
   const [countdown, setCountdown] = useState(null);
   const [lobbyTransitioning, setLobbyTransitioning] = useState(false);
   const chatEndRef = useRef(null);
@@ -163,7 +164,7 @@ export default function Battle() {
       room,
       profile,
       onStateChange: (newPhase, b, r) => {
-        console.log(`[Battle] PHASE CHANGE → ${newPhase}`, { battleStatus: b?.status, roomStatus: r?.status });
+        console.log(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] PHASE → ${newPhase}`, 'color:#a855f7', { battle: b?.status, room: r?.status });
         if (newPhase === 'active') playUiSound('phase_change');
         if (newPhase === 'voting') playUiSound('phase_change');
       },
@@ -243,6 +244,7 @@ export default function Battle() {
       setLobbyTransitioning(false);
       return;
     }
+    console.log(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] LOBBY-COUNTDOWN started`, 'color:#a855f7');
     const target = new Date(room.countdown_started_at).getTime() + 5000;
     let raf;
     function tick() {
@@ -328,7 +330,7 @@ export default function Battle() {
 
   // ── Detect win/loss when battle closes ────────────────────────────────────
   const wasClosed = useRef(false);
-  const oldEloRef = useRef(profile?.elo ?? DEFAULT_ELO);
+  const oldXpRef = useRef(profile?.xp ?? 0);
   const refreshProfile = useAuthStore((s) => s.refreshProfile);
   useEffect(() => {
     if (loading || !profile) return;
@@ -336,68 +338,44 @@ export default function Battle() {
       wasClosed.current = true;
       console.log('[Battle] BATTLE CLOSED', { winnerId: battle?.winner_id, myId: profile.id, isRanked, isSolo });
 
-      if (battle?.winner_id === profile.id) {
-        console.log('[Battle] WIN DETECTED');
+      const isWinner = battle?.winner_id === profile.id;
+      const sorted = !isSolo && submissions.length > 0
+        ? [...submissions].sort((a, b) => (b.rating_total ?? 0) - (a.rating_total ?? 0))
+        : [];
+      const myRank = sorted.findIndex(s => s.user_id === profile.id) + 1;
+      const showWin = isWinner || (myRank > 0 && myRank <= 3);
+
+      if (showWin) {
+        console.log('[Battle] WIN/PLACEMENT DETECTED', { rank: myRank || 1 });
         playUiSound('win');
-        setShowWinModal(true);
-        // ELO is written before battle status changes to closed
-        async function fetchEloWithRetry(attempts = 0) {
-          const { data } = await supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle();
-          const newEloVal = data?.elo ?? oldEloRef.current;
-          const gain = newEloVal - oldEloRef.current;
+        setShowRankUpModal(true);
+
+        async function fetchXpWithRetry(attempts = 0) {
+          const { data } = await supabase.from('profiles').select('xp, level').eq('id', profile.id).maybeSingle();
+          const newXpVal = data?.xp ?? oldXpRef.current;
+          const gain = newXpVal - oldXpRef.current;
           if (gain === 0 && attempts < 3) {
             await new Promise(r => setTimeout(r, 800));
-            return fetchEloWithRetry(attempts + 1);
+            return fetchXpWithRetry(attempts + 1);
           }
-          const newTier = data?.rank_tier || tierFromElo(newEloVal);
-          const oldTier = tierFromElo(oldEloRef.current);
-          console.log('[Battle] WIN ELO:', { oldElo: oldEloRef.current, newElo: newEloVal, gain, oldTier, newTier });
-          setWinEloGain(gain);
-          setWinOldTier(oldTier);
-          setWinNewTier(newTier);
+          const oldLevel = profile.level || 1;
+          const newLevel = data?.level || 1;
+          setRankUpXpGain(gain || 5);
+          setRankUpOldXp(oldXpRef.current);
+          setRankUpNewXp(newXpVal);
+          setRankUpOldLevel(oldLevel);
+          setRankUpNewLevel(newLevel);
           refreshProfile();
         }
-        fetchEloWithRetry();
+        fetchXpWithRetry();
         return;
       }
 
       if (isRanked && battle?.winner_id && battle.winner_id !== profile.id) {
         console.log('[Battle] LOSS DETECTED', { winnerId: battle.winner_id });
         playUiSound('forfeit');
-        async function fetchLossWithRetry(attempts = 0) {
-          const { data } = await supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle();
-          const newEloVal = data?.elo ?? oldEloRef.current;
-          const loss = oldEloRef.current - newEloVal;
-          if (loss === 0 && attempts < 3) {
-            await new Promise(r => setTimeout(r, 800));
-            return fetchLossWithRetry(attempts + 1);
-          }
-          if (loss > 0) {
-            console.log('[Battle] LOSS ELO:', { oldElo: oldEloRef.current, newElo: newEloVal, loss });
-            addToast(`ELO LOSS: -${loss}`, 'error');
-          }
-          refreshProfile();
-        }
-        fetchLossWithRetry();
-      }
-
-      if (!isSolo && submissions.length > 0) {
-        const sorted = [...submissions].sort((a, b) => (b.rating_total ?? 0) - (a.rating_total ?? 0));
-        if (sorted[0]?.user_id === profile.id) {
-          setShowWinModal(true);
-          supabase.from('profiles').select('elo, rank_tier').eq('id', profile.id).maybeSingle().then(({ data }) => {
-            const newEloVal = data?.elo ?? oldEloRef.current;
-            const newTier = data?.rank_tier || tierFromElo(newEloVal);
-            const oldTier = tierFromElo(oldEloRef.current);
-            let gain = newEloVal - oldEloRef.current;
-            if (gain === 0) gain = 1;
-            console.log('[Battle] VOTE WIN ELO:', { oldElo: oldEloRef.current, newElo: newEloVal, gain, oldTier, newTier });
-            setWinEloGain(gain);
-            setWinOldTier(oldTier);
-            setWinNewTier(newTier);
-            refreshProfile();
-          });
-        }
+        addToast('BATTLE LOST', 'error');
+        refreshProfile();
       }
     }
   }, [phase, loading, profile?.id]);
@@ -529,7 +507,8 @@ export default function Battle() {
         if (battle?.id) {
           await supabase.from('battles').update({ status: 'closed', early_closed: true }).eq('id', battle.id);
         }
-        // Close and delete room
+        // Delete chat messages, close and delete room
+        await supabase.from('room_messages').delete().eq('room_id', room.id);
         await supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id);
         await supabase.from('rooms').delete().eq('id', room.id);
         window.__clearReturnTo?.();
@@ -1242,13 +1221,14 @@ export default function Battle() {
         </div>
       </ConfirmModal>
 
-      <WinModal
-        open={showWinModal}
-        eloChange={winEloGain}
-        oldTier={winOldTier}
-        newTier={winNewTier}
-        onPlayAgain={() => { selfLeaving.current = true; window.__clearReturnTo?.(); navigate('/', { replace: true }); }}
-        onClose={() => setShowWinModal(false)}
+      <RankUpModal
+        open={showRankUpModal}
+        xpGain={rankUpXpGain}
+        oldXp={rankUpOldXp}
+        newXp={rankUpNewXp}
+        oldLevel={rankUpOldLevel}
+        newLevel={rankUpNewLevel}
+        onDone={() => setShowRankUpModal(false)}
       />
     </main>
   );

@@ -39,13 +39,9 @@ export default function SampleCard({ challenge, phase, room }) {
         </div>
       )}
 
-      <h1 className={`${isVoting ? '' : 'mt-4'} font-mono text-3xl font-bold uppercase text-rdb-text`}>
-        {challenge.title}
-      </h1>
-
       {challenge.uploader && (
-        <p className="mt-1 font-mono text-[11px] uppercase text-rdb-muted">
-          SAMPLE BY {challenge.uploader}
+        <p className="mt-4 font-mono text-[11px] uppercase text-rdb-muted">
+          SAMPLE THIS FROM {challenge.uploader}
         </p>
       )}
 

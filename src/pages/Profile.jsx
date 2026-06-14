@@ -6,6 +6,7 @@ import ReportButton from '../components/social/ReportButton';
 import RankBadge from '../components/ui/RankBadge';
 import TokenBadge from '../components/tokens/TokenBadge';
 import { formatNumber, getNameCosmeticClassName, getNameGradientStyle, getNameplateEmoji, getProfileAccentStyle } from '../lib/display';
+import { xpForLevel } from '../lib/xp';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
@@ -43,6 +44,12 @@ export default function Profile() {
   const rankedRate = rankedPlayed ? Math.round((rankedWins / rankedPlayed) * 100) : 0;
   const joined = profile.created_at ? new Date(profile.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'UNKNOWN';
 
+  const level = profile.level || 1;
+  const xp = profile.xp || 0;
+  const xpCurrent = xpForLevel(level);
+  const xpNext = xpForLevel(level + 1);
+  const levelProgress = xpNext > xpCurrent ? ((xp - xpCurrent) / (xpNext - xpCurrent)) : 1;
+
   async function saveDescription() {
     try {
       const { error } = await supabase.from('profiles').update({ description }).eq('id', profile.id);
@@ -62,16 +69,16 @@ export default function Profile() {
       style={getProfileAccentStyle(profile)}
     >
       <div className="relative z-10 mx-auto flex max-w-[760px] items-center justify-between">
-        <Link className="rdb-button" to="/"><ArrowLeft size={14} />MAIN MENU</Link>
+        <Link className="rdb-button" style={{ borderColor: 'var(--profile-accent)', color: 'var(--profile-accent)' }} to="/"><ArrowLeft size={14} />MAIN MENU</Link>
         <div className="flex gap-2">
-          {isOwnProfile && <Link className="rdb-button" to="/settings"><Settings size={14} />SETTINGS</Link>}
-          <Link className="rdb-button" to="/cosmetics"><Shirt size={14} />COSMETICS</Link>
+          {isOwnProfile && <Link className="rdb-button" style={{ borderColor: 'var(--profile-accent)', color: 'var(--profile-accent)' }} to="/settings"><Settings size={14} />SETTINGS</Link>}
+          <Link className="rdb-button" style={{ borderColor: 'var(--profile-accent)', color: 'var(--profile-accent)' }} to="/cosmetics"><Shirt size={14} />COSMETICS</Link>
         </div>
       </div>
 
       <section className="rdb-panel relative z-10 mx-auto max-w-[760px] p-5" style={{ borderColor: 'var(--profile-accent)' }}>
         <div className="grid gap-4 md:grid-cols-[1fr_270px]">
-          <div className="bg-rdb-surface/30 p-5">
+          <div className="p-5" style={{ backgroundColor: 'color-mix(in srgb, var(--profile-accent) 8%, var(--color-rdb-surface))' }}>
             <div className="flex flex-col items-center gap-5 text-center sm:flex-row sm:text-left">
               {profile.avatar_url ? <img loading="lazy" className="h-28 w-28 rounded-lg object-cover shadow-[0_0_28px_rgba(255,157,0,0.16)]" src={profile.avatar_url} alt="" /> : <div className="grid h-28 w-28 place-items-center rounded-lg bg-rdb-surface text-4xl">🎧</div>}
               <div className="min-w-0">
@@ -79,17 +86,17 @@ export default function Profile() {
                   {profile.nameplate_icon && <span className="mr-2 text-3xl text-rdb-orange">{getNameplateEmoji(profile.nameplate_icon)}</span>}
                   {profile.username}
                 </h1>
-                <button className="mt-1 block truncate font-mono text-[10px] uppercase text-rdb-muted hover:text-rdb-orange" type="button" onClick={() => { playUiSound('click'); navigator.clipboard.writeText(profile.id); addToast('USER ID COPIED'); }} title="Click to copy user ID">{profile.id}</button>
-                <div className="mt-1 flex items-center justify-center gap-1 font-mono text-[11px] uppercase text-rdb-muted sm:justify-start"><Calendar size={12} />JOINED {joined}</div>
+                <button className="mt-1 block truncate font-mono text-[10px] uppercase text-rdb-text hover:text-rdb-orange" type="button" onClick={() => { playUiSound('click'); navigator.clipboard.writeText(profile.id); addToast('USER ID COPIED'); }} title="Click to copy user ID">{profile.id}</button>
+                <div className="mt-1 flex items-center justify-center gap-1 font-mono text-[11px] uppercase text-rdb-text sm:justify-start"><Calendar size={12} />JOINED {joined}</div>
                 <div className="mt-5 flex flex-wrap justify-center gap-2 sm:justify-start">
                   <RankBadge tier={profile.rank_tier} />
-                  <span className="inline-flex items-center gap-1 border border-rdb-border px-2 py-1 font-mono text-xs uppercase text-rdb-muted"><Trophy size={12} />{profile.elo || 1000} ELO</span>
+                  <span className="inline-flex items-center gap-1 border border-rdb-border px-2 py-1 font-mono text-xs uppercase text-rdb-text"><Trophy size={12} />LVL {profile.level || 1}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          <aside className="bg-rdb-surface/20 p-4" style={{ border: '1px solid var(--profile-accent, var(--color-rdb-border))' }}>
+          <aside className="p-4" style={{ backgroundColor: 'color-mix(in srgb, var(--profile-accent) 8%, var(--color-rdb-surface))', border: '1px solid var(--profile-accent, var(--color-rdb-border))' }}>
             <div className="grid min-h-[140px] place-items-center gap-3 text-center font-mono uppercase">
               <StatBlock value={profile.elo || 1000} label="ELO" />
               <StatBlock value={rankedWins} label="RANKED WINS" />
@@ -100,9 +107,9 @@ export default function Profile() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          {customBadge && <span className="inline-flex items-center gap-1 px-2 py-1 font-mono text-xs text-rdb-muted" ><BadgeCheck size={12} />{customBadge}</span>}
-          <span className="px-2 py-1 font-mono text-xs uppercase text-rdb-muted">TIER {profile.rank_tier || 'bronze'}</span>
-          <span className="px-2 py-1 font-mono text-xs uppercase text-rdb-muted" ><TokenBadge amount={profile.tokens} /></span>
+          {customBadge && <span className="inline-flex items-center gap-1 px-2 py-1 font-mono text-xs text-rdb-text" ><BadgeCheck size={12} />{customBadge}</span>}
+          <span className="px-2 py-1 font-mono text-xs uppercase text-rdb-text">TIER {profile.rank_tier || 'bronze'}</span>
+          <span className="px-2 py-1 font-mono text-xs uppercase text-rdb-text" ><TokenBadge amount={profile.tokens} /></span>
           <div className="ml-auto flex gap-2"><AddFriendButton targetUserId={profile.id} /><ReportButton reportedUserId={profile.id} /></div>
         </div>
       </section>
@@ -110,12 +117,12 @@ export default function Profile() {
       <section className="rdb-panel relative z-10 mx-auto max-w-[760px] p-5" style={{ borderColor: 'var(--profile-accent)' }}>
         <div className="flex items-center justify-between gap-3">
           <h2 className="rdb-section-title">ABOUT</h2>
-          {isOwnProfile && <button className="rdb-button" type="button" onClick={() => editing ? saveDescription() : setEditing(true)}>{editing ? <Save size={14} /> : <Edit3 size={14} />}{editing ? 'SAVE' : 'EDIT'}</button>}
+          {isOwnProfile && <button className="rdb-button" style={{ borderColor: 'var(--profile-accent)', color: 'var(--profile-accent)' }} type="button" onClick={() => editing ? saveDescription() : setEditing(true)}>{editing ? <Save size={14} /> : <Edit3 size={14} />}{editing ? 'SAVE' : 'EDIT'}</button>}
         </div>
         {editing ? (
           <textarea className="rdb-input min-h-24" maxLength={240} value={description} onChange={(event) => setDescription(event.target.value)} />
         ) : (
-          <p className="font-mono text-[12px] text-rdb-muted">{profile.description || 'No description yet. Click Edit to add one.'}</p>
+          <p className="font-mono text-[12px] text-rdb-text">{profile.description || 'No description yet. Click Edit to add one.'}</p>
         )}
       </section>
     </main>
@@ -124,5 +131,5 @@ export default function Profile() {
 
 function StatBlock({ value, label, suffix = '' }) {
   const displayValue = typeof value === 'number' ? formatNumber(value) : value;
-  return <div><div className="text-3xl text-rdb-text">{displayValue}{suffix}</div><div className="text-[11px] text-rdb-muted">{label}</div></div>;
+  return <div><div className="text-3xl font-bold text-rdb-text">{displayValue}{suffix}</div><div className="text-[11px] uppercase text-rdb-text">{label}</div></div>;
 }

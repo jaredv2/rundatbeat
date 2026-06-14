@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { computeNewElos, DEFAULT_ELO, tierFromElo } from '../lib/elo';
+import { computeXpGain, levelFromXp, xpForLevel } from '../lib/xp';
 import { advanceLobbyToActive } from '../lib/roomService';
 import { pushNotificationToMany } from '../lib/pushNotification';
+
+function log(tag, ...args) {
+  console.log(`%c[${new Date().toISOString().slice(11, 23)}] [FSM] ${tag}`, 'color:#3b82f6', ...args);
+}
 
 const DEFAULT_VOTING_MINUTES = 3;
 const LOBBY_COUNTDOWN_MS = 5000;
@@ -40,6 +45,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
 
   useEffect(() => {
     const nextPhase = derivePhase(battle, room);
+    log('PHASE', '→', nextPhase, '| battle:', battle?.status, '| room:', room?.status, '| countdown:', room?.countdown_started_at ? 'yes' : 'no');
     setPhase(nextPhase);
     setPhaseEndsAt(phaseEndTimestamp(nextPhase, battle, room));
     onStateChange?.(nextPhase, battle, room);
@@ -91,9 +97,11 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
           const countdownEnd = new Date(r.countdown_started_at).getTime() + LOBBY_COUNTDOWN_MS;
           if (now >= countdownEnd && !advancingLobby.current) {
             advancingLobby.current = true;
+            log('TICK', 'lobby countdown expired → advanceLobbyToActive');
             try {
               await advanceLobbyToActive(r.id);
             } catch (err) {
+              log('TICK', 'advanceLobbyToActive ERROR:', err.message);
               advancingLobby.current = false;
             }
           }
@@ -103,6 +111,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
       if (currentPhase === 'upcoming' && b) {
         const startsAt = b.starts_at ? new Date(b.starts_at).getTime() : null;
         if (startsAt && now >= startsAt && (isSolo || r.status === 'locked')) {
+          log('TICK', 'upcoming expired (starts_at reached) → advanceToActive');
           await advanceToActive(b.id, r.id, isSolo);
         }
       }
@@ -111,8 +120,10 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         const votingEndsAt = b.voting_ends_at ? new Date(b.voting_ends_at).getTime() : null;
         if (votingEndsAt && now >= votingEndsAt) {
           if (isSolo) {
+            log('TICK', 'solo active expired → advanceToClosed');
             await advanceToClosed(b.id, r.id);
           } else {
+            log('TICK', 'active expired (voting_ends_at reached) → advanceToVoting');
             await advanceToVoting(b.id, r.id, r.voting_minutes);
           }
         }
@@ -123,6 +134,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         const allStopped = await allPlayersStoppedVoting(r?.id);
 
         if (!closingRef.current && (allStopped || (closedAt && now >= closedAt))) {
+          log('TICK', 'voting ended — allStopped:', allStopped, '→ advanceToClosed');
           closingRef.current = true;
           setCalculatingWinner(true);
           try {
@@ -159,6 +171,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
           else if (rs === 'lobby') nextPhase = 'lobby';
           else if (rs === 'matchmaking') nextPhase = 'matchmaking';
           else nextPhase = derivePhase(b, payload.new);
+          log('RT:ROOM', 'status:', rs, '→ phase:', nextPhase);
           setPhase(nextPhase);
           setPhaseEndsAt(phaseEndTimestamp(nextPhase, b, payload.new));
           onStateChange?.(nextPhase, b, payload.new);
@@ -172,6 +185,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         (payload) => {
           const r = roomRef.current;
           const nextPhase = derivePhase(payload.new, r);
+          log('RT:BATTLE', 'status:', payload.new?.status, '→ phase:', nextPhase);
           setPhase(nextPhase);
           setPhaseEndsAt(phaseEndTimestamp(nextPhase, payload.new, r));
           onStateChange?.(nextPhase, payload.new, r);
@@ -192,6 +206,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
 
   const forceClose = useCallback(async () => {
     if (!isOwner || !battle || !room) return;
+    log('FORCE-CLOSE', 'battle:', battle.id, 'room:', room.id, 'mode:', room.mode);
 
     if (room.mode !== 'ranked') {
       const { data: top } = await supabase
@@ -211,8 +226,10 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         supabase.from('rooms').update({ status: 'closed' }).eq('id', room.id)
           .in('status', ['locked', 'voting']),
       ]);
+      log('FORCE-CLOSE', 'SUCCESS — non-ranked');
     } else {
       await advanceToClosed(battle.id, room.id, { closeRoom: true });
+      log('FORCE-CLOSE', 'SUCCESS — ranked');
     }
   }, [isOwner, battle, room]);
 
@@ -254,6 +271,8 @@ function votingCloseTimestamp(battle, room) {
 }
 
 async function advanceToActive(battleId, roomId, isSolo = false) {
+  log('UPCOMING→ACTIVE', 'battle:', battleId, 'room:', roomId, 'solo:', isSolo);
+  const t0 = Date.now();
   const [battleRes, roomRes] = await Promise.all([
     supabase
       .from('battles')
@@ -266,13 +285,17 @@ async function advanceToActive(battleId, roomId, isSolo = false) {
       .eq('id', roomId)
       .in('status', ['lobby', 'open', 'locked']),
   ]);
+  const dt = Date.now() - t0;
   if (battleRes.error) throw new Error(`advanceToActive battles: ${battleRes.error.message}`);
   if (roomRes.error) throw new Error(`advanceToActive rooms: ${roomRes.error.message}`);
+  log('UPCOMING→ACTIVE', 'SUCCESS — DB write took', dt + 'ms');
 }
 
 async function advanceToVoting(battleId, roomId, votingMinutes = DEFAULT_VOTING_MINUTES) {
   const mins = votingMinutes || DEFAULT_VOTING_MINUTES;
   const votingEndsAt = new Date(Date.now() + mins * 60 * 1000).toISOString();
+  log('ACTIVE→VOTING', 'battle:', battleId, 'room:', roomId, 'votingMin:', mins);
+  const t0 = Date.now();
   const [battleRes, roomRes] = await Promise.all([
     supabase
       .from('battles')
@@ -285,13 +308,19 @@ async function advanceToVoting(battleId, roomId, votingMinutes = DEFAULT_VOTING_
       .eq('id', roomId)
       .in('status', ['locked']),
   ]);
+  const dt = Date.now() - t0;
   if (battleRes.error) throw new Error(`advanceToVoting battles: ${battleRes.error.message}`);
   if (roomRes.error) throw new Error(`advanceToVoting rooms: ${roomRes.error.message}`);
+  log('ACTIVE→VOTING', 'SUCCESS — DB write took', dt + 'ms', 'voting ends:', votingEndsAt);
 }
 
 async function advanceToClosed(battleId, roomId, { closeRoom = false } = {}) {
-  if (_closingGuards.get(battleId)) return;
+  if (_closingGuards.get(battleId)) {
+    log('→CLOSED', 'SKIP — already closing battle:', battleId);
+    return;
+  }
   _closingGuards.set(battleId, true);
+  log('→CLOSED', 'battle:', battleId, 'room:', roomId, 'closeRoom:', closeRoom);
 
   try {
   const { count: memberCount } = await supabase
@@ -362,6 +391,7 @@ async function advanceToClosed(battleId, roomId, { closeRoom = false } = {}) {
 
         console.log('[RoomFSM] FORFEIT ELO:', { battleId, winnerId, eloUpdates });
 
+        const tElo = Date.now();
         await supabase.from('battles').update({ winner_id: winnerId, early_closed: true })
           .eq('id', battleId).is('winner_id', null);
 
@@ -377,6 +407,7 @@ async function advanceToClosed(battleId, roomId, { closeRoom = false } = {}) {
             ranked_losses: (prof?.ranked_losses || 0) + (!isWinner ? 1 : 0),
           }).eq('id', u.user_id);
         }));
+        log('FORFEIT ELO', 'profiles updated in', (Date.now() - tElo) + 'ms');
 
         pushNotificationToMany(allUserIds.filter(id => id !== winnerId), {
           type: 'battle_lost', title: 'BATTLE LOST', body: 'Your opponent won by forfeit.',
@@ -429,6 +460,7 @@ async function advanceToClosed(battleId, roomId, { closeRoom = false } = {}) {
 
           console.log('[RoomFSM] NORMAL CLOSE ELO:', { battleId, winnerId, eloUpdates });
 
+          const tElo = Date.now();
           await Promise.all(eloUpdates.map(u => {
             const prof = (profiles || []).find(p => p.id === u.user_id);
             const isFirst = ranking[u.user_id] === 1;
@@ -441,6 +473,7 @@ async function advanceToClosed(battleId, roomId, { closeRoom = false } = {}) {
               ranked_losses: (prof?.ranked_losses || 0) + (!isFirst ? 1 : 0),
             }).eq('id', u.user_id);
           }));
+          log('NORMAL ELO', 'profiles updated in', (Date.now() - tElo) + 'ms');
 
           const losers = userIds.filter(id => id !== winnerId);
           pushNotificationToMany(losers, {
@@ -458,21 +491,90 @@ async function advanceToClosed(battleId, roomId, { closeRoom = false } = {}) {
     }
   }
 
+  // ── Grant XP to all participants ──
+  const tXp = Date.now();
+  try {
+    const { data: room } = await supabase.from('rooms').select('mode').eq('id', roomId).maybeSingle();
+    const isRanked = battle?.mode === 'ranked';
+    const isRoom = room?.mode === 'room';
+
+    const { data: allSubs } = await supabase
+      .from('submissions')
+      .select('user_id, rating_total')
+      .eq('battle_id', battleId)
+      .order('rating_total', { ascending: false });
+
+    const { data: battleRow } = await supabase.from('battles').select('winner_id').eq('id', battleId).maybeSingle();
+    const winnerId = battleRow?.winner_id;
+
+    const xpGrants = [];
+    if (allSubs?.length) {
+      for (let i = 0; i < allSubs.length; i++) {
+        const rank = i + 1;
+        const xp = computeXpGain({ rank, isRanked, isRoom });
+        xpGrants.push({ userId: allSubs[i].user_id, xp, rank });
+      }
+    } else if (winnerId) {
+      xpGrants.push({ userId: winnerId, xp: computeXpGain({ rank: 1, isRanked, isRoom }), rank: 1 });
+    }
+
+    for (const grant of xpGrants) {
+      const { data: prof } = await supabase.from('profiles').select('xp, level').eq('id', grant.userId).maybeSingle();
+      const oldXp = prof?.xp || 0;
+      const newXp = oldXp + grant.xp;
+      const newLevel = levelFromXp(newXp);
+      await supabase.from('profiles').update({ xp: newXp, level: newLevel }).eq('id', grant.userId);
+      log('XP', grant.userId.slice(0, 8), `+${grant.xp} XP`, `rank #${grant.rank}`, `LVL ${newLevel}`);
+    }
+    log('XP', 'all grants done in', (Date.now() - tXp) + 'ms');
+  } catch (err) {
+    log('XP', 'ERROR:', err.message);
+  }
+
   // ── Close battle AFTER ELO is written ──
+  const tClose = Date.now();
   const battleRes = await supabase
     .from('battles')
     .update({ status: 'closed', ...(isAutoClose ? { early_closed: true } : {}) })
     .eq('id', battleId)
     .in('status', ['upcoming', 'active', 'voting']);
   if (battleRes.error) throw new Error(`advanceToClosed battles: ${battleRes.error.message}`);
+  log('→CLOSED', 'battle closed:', battleId, '| DB write took', (Date.now() - tClose) + 'ms');
 
   // ── Close room only when all players locked voting ──
   if (closeRoom) {
+    const tRoom = Date.now();
     await supabase
       .from('rooms')
       .update({ status: 'closed' })
       .eq('id', roomId)
       .in('status', ['locked', 'voting']);
+    log('→CLOSED', 'room closed:', roomId, '| DB write took', (Date.now() - tRoom) + 'ms');
+  }
+
+  // ── Delete audio files from storage ──
+  try {
+    const tStorage = Date.now();
+    const { data: userFolders, error: listErr } = await supabase.storage
+      .from('beats')
+      .list(battleId);
+    if (listErr) throw listErr;
+    let totalDeleted = 0;
+    for (const folder of (userFolders || [])) {
+      if (!folder.name) continue;
+      const { data: files } = await supabase.storage
+        .from('beats')
+        .list(`${battleId}/${folder.name}`);
+      if (files?.length) {
+        const paths = files.map(f => `${battleId}/${folder.name}/${f.name}`);
+        const { error: delErr } = await supabase.storage.from('beats').remove(paths);
+        if (delErr) throw delErr;
+        totalDeleted += files.length;
+      }
+    }
+    log('→CLOSED', 'deleted', totalDeleted, 'audio files in', (Date.now() - tStorage) + 'ms');
+  } catch (err) {
+    log('→CLOSED', 'storage cleanup ERROR:', err.message);
   }
 
   } finally {

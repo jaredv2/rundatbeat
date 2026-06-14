@@ -76,11 +76,18 @@ export function useBattle(id) {
   // ── Resolve the actual battle_id from raw id (could be room UUID or battle UUID) ──
   async function resolveIds(rawId) {
     let b = await supabase.from('battles').select('id').eq('id', rawId).maybeSingle();
-    if (b?.data) return { battleId: b.data.id, roomId: null };
+    if (b?.data) {
+      console.log(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → battle:${b.data.id.slice(0,8)}`, 'color:#a855f7');
+      return { battleId: b.data.id, roomId: null };
+    }
 
     let r = await supabase.from('rooms').select('id, battle_id').eq('id', rawId).maybeSingle();
-    if (r?.data) return { battleId: r.data.battle_id || null, roomId: r.data.id };
+    if (r?.data) {
+      console.log(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → room:${r.data.id.slice(0,8)} battle:${(r.data.battle_id||'none').slice(0,8)}`, 'color:#a855f7');
+      return { battleId: r.data.battle_id || null, roomId: r.data.id };
+    }
 
+    console.log(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → NOT FOUND`, 'color:#a855f7');
     return { battleId: null, roomId: null };
   }
 
@@ -149,6 +156,7 @@ export function useBattle(id) {
             .maybeSingle();
           if (!existingMember) {
             try {
+              console.log(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] AUTO-JOIN room:`, 'color:#a855f7', loadedRoom.id);
               if (loadedRoom.status === 'lobby') {
                 const { joinRoom } = await import('../lib/roomService');
                 await joinRoom(loadedRoom.id, user.id);

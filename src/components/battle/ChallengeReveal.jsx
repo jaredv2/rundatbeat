@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Music } from 'lucide-react';
 import { playUiSound } from '../../lib/sfx';
 import { generateChallengeAsync } from '../../lib/lobbyService';
-import { generateCustomRoomChallenge, generateSoloChallenge } from '../../lib/roomService';
+import { generateSoloChallenge } from '../../lib/roomService';
 import { supabase } from '../../lib/supabase';
 
 function useCountdownFrom(endsAt) {
@@ -48,16 +48,13 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
     if (challenge?.restrictionsList) return;
     aiFired.current = true;
 
-    if (roomMode === 'room') {
-      // Custom room — fetch sample + generate AI directly
-      generateCustomRoomChallenge(roomId)
-        .catch((err) => console.error('[ChallengeReveal] AI FAILED:', err));
-    } else if (roomMode === 'solo') {
+    if (roomMode === 'solo') {
       // Solo — fetch sample + generate AI with difficulty
       generateSoloChallenge(roomId, difficulty)
         .catch((err) => console.error('[ChallengeReveal] AI FAILED:', err));
-    } else {
+    } else if (roomMode !== 'room') {
       // Ranked — find lobby and use lobbyService
+      // (room mode is generated once in advanceLobbyToActive)
       (async () => {
         const { data: lobby } = await supabase
           .from('ranked_lobbies')

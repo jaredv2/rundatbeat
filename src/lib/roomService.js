@@ -1,6 +1,11 @@
 import { supabase } from './supabase';
 
+function log(tag, ...args) {
+  console.log(`%c[${new Date().toISOString().slice(11, 23)}] [ROOM] ${tag}`, 'color:#f97316', ...args);
+}
+
 export async function createRoom({ isPublic, hostId, maxPlayers = 4, battleMinutes = 45, songLengthSeconds = 60, votingMinutes = 3, name, allowInstructions = true, allowRestrictions = true }) {
+  log('CREATE', 'name:', name, 'host:', hostId, 'maxPlayers:', maxPlayers, 'battleMin:', battleMinutes);
   const { data: room, error: roomErr } = await supabase
     .from('rooms')
     .insert({
@@ -21,12 +26,14 @@ export async function createRoom({ isPublic, hostId, maxPlayers = 4, battleMinut
     .single();
 
   if (roomErr) throw roomErr;
+  log('CREATE', 'room created:', room.id, 'status:', room.status);
 
   const { error: memberErr } = await supabase
     .from('room_members')
     .insert({ room_id: room.id, user_id: hostId, role: 'owner', is_ready: false });
 
   if (memberErr) throw memberErr;
+  log('CREATE', 'owner added to room_members');
 
   return { room };
 }
@@ -40,6 +47,7 @@ export async function toggleReady(roomId, userId) {
     .maybeSingle();
 
   const newReady = !member?.is_ready;
+  log('READY', 'user:', userId, 'ready:', newReady);
 
   await supabase
     .from('room_members')
@@ -51,6 +59,7 @@ export async function toggleReady(roomId, userId) {
 }
 
 export async function startCountdown(roomId) {
+  log('COUNTDOWN', 'starting countdown for room:', roomId);
   await supabase
     .from('rooms')
     .update({ countdown_started_at: new Date().toISOString() })
@@ -58,6 +67,7 @@ export async function startCountdown(roomId) {
 }
 
 export async function advanceLobbyToActive(roomId) {
+  log('LOBBY→ACTIVE', 'advancing room:', roomId);
   // Optimistic lock: only advance if still in lobby
   const { data: room } = await supabase
     .from('rooms')
@@ -65,7 +75,10 @@ export async function advanceLobbyToActive(roomId) {
     .eq('id', roomId)
     .maybeSingle();
 
-  if (!room || room.status !== 'lobby') return null;
+  if (!room || room.status !== 'lobby') {
+    log('LOBBY→ACTIVE', 'SKIP — room status:', room?.status);
+    return null;
+  }
 
   const { count: playerCount } = await supabase
     .from('room_members')
@@ -77,6 +90,7 @@ export async function advanceLobbyToActive(roomId) {
   const duration = room?.challenge?.battleMinutes || 15;
   const songLength = room?.song_length_seconds || 60;
   const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
+  log('LOBBY→ACTIVE', 'players:', playerCount, 'duration:', duration + 'min', 'starts:', starts.toISOString());
 
   try {
     const { data: battle, error: battleErr } = await supabase.from('battles').insert({
@@ -96,17 +110,19 @@ export async function advanceLobbyToActive(roomId) {
     }).select('id').single();
 
     if (battleErr) throw battleErr;
+    log('LOBBY→ACTIVE', 'battle created:', battle.id);
 
     // Optimistic lock: only update room if still in lobby (prevents duplicate battles)
-    // Preserve challenge settings (allowInstructions, allowRestrictions, battleMinutes)
+    // Preserve full challenge if already generated (restrictionsList means it was generated during countdown)
     const { data: existingRoom } = await supabase.from('rooms').select('challenge').eq('id', roomId).maybeSingle();
     const existingChallenge = existingRoom?.challenge || {};
+    const challengeAlreadyGenerated = !!existingChallenge.restrictionsList;
     const { data: updatedRoom, error: roomUpdateErr } = await supabase
       .from('rooms')
       .update({
         battle_id: battle.id,
         status: 'locked',
-        challenge: {
+        challenge: challengeAlreadyGenerated ? existingChallenge : {
           allowInstructions: existingChallenge.allowInstructions !== false,
           allowRestrictions: existingChallenge.allowRestrictions !== false,
           battleMinutes: existingChallenge.battleMinutes || duration,
@@ -120,13 +136,28 @@ export async function advanceLobbyToActive(roomId) {
       .maybeSingle();
 
     if (roomUpdateErr || !updatedRoom) {
+      log('LOBBY→ACTIVE', 'RACE LOST — deleting orphan battle:', battle.id);
       // Another client already advanced — delete orphan battle
       await supabase.from('battles').delete().eq('id', battle.id);
       return null;
     }
 
+    log('LOBBY→ACTIVE', 'SUCCESS — room locked, battle linked:', battle.id);
+
+    // Generate challenge AFTER room is locked — only the winner of the optimistic lock generates
+    // This ensures all players get the same sample + instructions
+    if (!challengeAlreadyGenerated) {
+      try {
+        await generateCustomRoomChallenge(roomId);
+        log('LOBBY→ACTIVE', 'challenge generated for room:', roomId);
+      } catch (err) {
+        log('LOBBY→ACTIVE', 'challenge generation failed:', err.message);
+      }
+    }
+
     return { battleId: battle.id };
   } catch (err) {
+    log('LOBBY→ACTIVE', 'ERROR:', err.message);
     await supabase.from('rooms').update({ countdown_started_at: null }).eq('id', roomId);
     throw err;
   }
@@ -134,6 +165,12 @@ export async function advanceLobbyToActive(roomId) {
 
 // Fetch sample + generate AI challenge for a custom room (called during challenge reveal)
 export async function generateCustomRoomChallenge(roomId) {
+  // Skip if challenge already exists — only generate once per room
+  const { data: existingRoom } = await supabase.from('rooms').select('challenge').eq('id', roomId).maybeSingle();
+  if (existingRoom?.challenge?.restrictionsList) {
+    return existingRoom.challenge;
+  }
+
   const { count: playerCount } = await supabase
     .from('room_members')
     .select('room_id', { count: 'exact' })
@@ -160,12 +197,12 @@ export async function generateCustomRoomChallenge(roomId) {
   challengePayload.restrictionsList = restrictionsText;
 
   // Preserve room settings from existing challenge
-  const { data: existingRoom } = await supabase.from('rooms').select('challenge').eq('id', roomId).maybeSingle();
-  if (existingRoom?.challenge) {
-    challengePayload.allowInstructions = existingRoom.challenge.allowInstructions !== false;
-    challengePayload.allowRestrictions = existingRoom.challenge.allowRestrictions !== false;
-    if (existingRoom.challenge.battleMinutes) {
-      challengePayload.battleMinutes = existingRoom.challenge.battleMinutes;
+  const roomChallenge = existingRoom?.challenge;
+  if (roomChallenge) {
+    challengePayload.allowInstructions = roomChallenge.allowInstructions !== false;
+    challengePayload.allowRestrictions = roomChallenge.allowRestrictions !== false;
+    if (roomChallenge.battleMinutes) {
+      challengePayload.battleMinutes = roomChallenge.battleMinutes;
     }
   }
 
@@ -232,6 +269,7 @@ export async function generateSoloChallenge(roomId, difficulty = 'medium') {
 }
 
 export async function joinRoom(roomId, userId) {
+  log('JOIN', 'user:', userId, 'room:', roomId);
   const { data: room } = await supabase
     .from('rooms')
     .select('status, max_players, current_players, mode')
@@ -254,10 +292,14 @@ export async function joinRoom(roomId, userId) {
     .insert({ room_id: roomId, user_id: userId, role: 'member', is_ready: false });
 
   if (error) {
-    if (error.code === '23505') return;
+    if (error.code === '23505') {
+      log('JOIN', 'already a member (duplicate key)');
+      return;
+    }
     throw error;
   }
 
+  log('JOIN', 'SUCCESS — player added, count:', (count || 0) + 1);
   await supabase
     .from('rooms')
     .update({ current_players: (count || 0) + 1 })
@@ -320,6 +362,7 @@ export async function deleteRoom(roomId) {
 }
 
 export async function leaveLobby(roomId, userId) {
+  log('LEAVE-LOBBY', 'user:', userId, 'room:', roomId);
   const { data: room } = await supabase
     .from('rooms')
     .select('owner_id, status')
@@ -329,6 +372,7 @@ export async function leaveLobby(roomId, userId) {
   const isOwner = room?.owner_id === userId;
 
   if (isOwner) {
+    log('LEAVE-LOBBY', 'owner leaving — closing room');
     await supabase.from('room_members').delete().eq('room_id', roomId);
     if (room.status === 'closed') {
       await deleteRoom(roomId);
@@ -348,12 +392,14 @@ export async function leaveLobby(roomId, userId) {
       .eq('room_id', roomId);
 
     if (count <= 0) {
+      log('LEAVE-LOBBY', 'last player left — closing room');
       if (room.status === 'closed') {
         await deleteRoom(roomId);
       } else {
         await supabase.from('rooms').update({ status: 'closed' }).eq('id', roomId);
       }
     } else {
+      log('LEAVE-LOBBY', 'remaining players:', count);
       await supabase
         .from('rooms')
         .update({ current_players: count })

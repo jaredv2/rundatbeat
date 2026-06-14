@@ -13,6 +13,7 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const addToast = useUiStore((s) => s.addToast);
 
   const maxSec = useMemo(
@@ -50,6 +51,14 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
     );
   }
 
+  if (submitted) {
+    return (
+      <div className="rdb-panel mx-auto max-w-[700px] p-5">
+        <p className="font-mono text-rdb-orange text-center">BEAT SUBMITTED</p>
+      </div>
+    );
+  }
+
   async function submit(event) {
     event.preventDefault();
     playUiSound('click');
@@ -82,6 +91,7 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
         addToast('BEAT SUBMITTED');
       }
       setProgress(100);
+      setSubmitted(true);
       onSubmitted?.();
     } catch (err) {
       addToast(err.message || 'SUBMISSION FAILED', 'error');
