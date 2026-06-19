@@ -229,6 +229,21 @@ export async function generateCustomRoomChallenge(roomId) {
   return challengePayload;
 }
 
+export async function startSoloSession(battleId, durationMinutes) {
+  log('START-SOLO', 'battle:', battleId, 'duration:', durationMinutes + 'min');
+  const now = new Date();
+  const votingEnds = new Date(now.getTime() + durationMinutes * 60 * 1000);
+  const { error } = await supabase
+    .from('battles')
+    .update({
+      starts_at: now.toISOString(),
+      voting_ends_at: votingEnds.toISOString(),
+    })
+    .eq('id', battleId);
+  if (error) throw error;
+  log('START-SOLO', 'SUCCESS — timer started');
+}
+
 // Fetch sample + generate AI challenge for solo session (called during challenge reveal)
 export async function generateSoloChallenge(roomId, difficulty = 'medium') {
   const { buildChallenge, buildSamplePayload } = await import('./challengeService');

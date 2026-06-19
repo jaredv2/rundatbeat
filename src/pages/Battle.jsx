@@ -35,7 +35,8 @@ import {
 import { supabase } from '../lib/supabase';
 import { devLog, devError } from '../lib/devLog';
 import { censorProfanity } from '../lib/profanity';
-import { toggleReady, startCountdown, deleteRoom as deleteRoomFn } from '../lib/roomService';
+import { getSoloDurationMinutes } from '../lib/groq';
+import { toggleReady, startCountdown, startSoloSession, deleteRoom as deleteRoomFn } from '../lib/roomService';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
 import { playUiSound } from '../lib/sfx';
@@ -553,6 +554,23 @@ export default function Battle() {
     }
   }
 
+  async function handleStartSolo() {
+    if (isStarting || !battle?.id) return;
+    playUiSound('click');
+    setIsStarting(true);
+    try {
+      const durationMin = getSoloDurationMinutes(soloDifficulty);
+      await startSoloSession(battle.id, durationMin);
+      await forceStart();
+      addToast('SESSION STARTED');
+    } catch (err) {
+      devError('[Battle] SOLO START FAILED:', err);
+      addToast(err.message || 'START FAILED', 'error');
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
   async function handleForceClose() {
     if (isClosing) return;
     playUiSound('cancel');
@@ -689,7 +707,28 @@ export default function Battle() {
       <div className="mx-auto w-full max-w-4xl space-y-3">
         {phase === 'upcoming' ? (
           room?.challenge ? (
-            <SampleCard challenge={room.challenge} phase={phase} room={room} />
+            <div className="space-y-3">
+              <SampleCard challenge={room.challenge} phase={phase} room={room} />
+              <div className="rdb-panel flex flex-col items-center gap-4 p-6 text-center">
+                <p className="font-mono text-[11px] uppercase text-rdb-muted">READY TO GO?</p>
+                <button
+                  className="rdb-button rdb-button-primary w-48"
+                  type="button"
+                  disabled={isStarting}
+                  onClick={handleStartSolo}
+                >
+                  {isStarting ? 'STARTING...' : 'START SESSION'}
+                </button>
+                <button
+                  className="rdb-button border-rdb-red text-rdb-red w-full"
+                  type="button"
+                  disabled={leavingRoom}
+                  onClick={leaveRoom}
+                >
+                  {leavingRoom ? 'LEAVING...' : 'LEAVE'}
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="rdb-panel p-8 text-center">
               <Spinner label="GENERATING CHALLENGE" />

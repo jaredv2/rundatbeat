@@ -131,7 +131,7 @@ export async function generateBattlePrompt({
 
   if (mode === 'ranked') {
     const diff = RANKED_DIFFICULTY[difficultyFromTier(tier)] || RANKED_DIFFICULTY.easy;
-    systemPrompt = `You are a beat battle prompt generator for RUNDATBEAT.
+    systemPrompt = `You are a beat battle prompt generator for SAMPLE BATTLE.
 
 LOOP CONTEXT:
   Title: ${loopTitle || 'untitled'}
@@ -147,7 +147,7 @@ Return ONLY raw valid JSON with keys: instruction (string), title (string), flav
 
   } else if (mode === 'solo') {
     const diff = SOLO_DIFFICULTY[difficulty] || SOLO_DIFFICULTY.medium;
-    systemPrompt = `You are a beat-making practice session generator for RUNDATBEAT.
+    systemPrompt = `You are a beat-making practice session generator for SAMPLE BATTLE.
 
 LOOP CONTEXT:
   Title: ${loopTitle || 'untitled'}
@@ -164,7 +164,7 @@ Return ONLY raw valid JSON with keys: instruction (string), title (string), flav
   } else {
     const diffLabel = roomDifficultyLabel(playerCount);
     const diff = RANKED_DIFFICULTY[diffLabel] || RANKED_DIFFICULTY.easy;
-    systemPrompt = `You are a room battle prompt generator for RUNDATBEAT.
+    systemPrompt = `You are a room battle prompt generator for SAMPLE BATTLE.
 
 LOOP CONTEXT:
   Title: ${loopTitle || 'untitled'}

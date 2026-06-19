@@ -23,7 +23,7 @@ export function sendBrowserNotification(title, options = {}) {
     const notif = new Notification(title, {
       icon: '/logo.png',
       badge: '/logo.png',
-      tag: options.tag || 'rundatbeat',
+      tag: options.tag || 'sample-battle',
       ...options,
     });
     if (options.onClick) {

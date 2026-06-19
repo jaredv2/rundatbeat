@@ -868,7 +868,7 @@ if (typeof window !== 'undefined') {
   window.lobbiesByStatus = cmds.lobbiesByStatus;
   window.roomsByStatus = cmds.roomsByStatus;
 
-  console.log('%c🔧 RUNDATBEAT Debug Console Loaded', 'color:#f97316;font-size:14px;font-weight:bold');
+  console.log('%c🔧 SAMPLE BATTLE Debug Console Loaded', 'color:#f97316;font-size:14px;font-weight:bold');
   console.log('%cType db.* for all commands, or use shorthand (whoami, health, etc.)', 'color:#6b7280;font-style:italic');
 }
 })();

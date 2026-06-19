@@ -337,8 +337,8 @@ export default function Home() {
 
       <section className="home-menu">
         <h1 className="flex flex-col items-center gap-3">
-          <img src="/logo.png" alt="RUNDATBEAT" className="h-28 w-28 sm:h-36 sm:w-36" />
-          <span className="font-mono text-2xl font-bold uppercase tracking-widest text-rdb-orange sm:text-3xl">RUNDATBEAT</span>
+          <img src="/logo.png" alt="SAMPLE BATTLE" className="h-28 w-28 sm:h-36 sm:w-36" />
+          <span className="font-mono text-2xl font-bold uppercase tracking-widest text-rdb-orange sm:text-3xl">SAMPLE BATTLE</span>
         </h1>
         <div className="home-actions">
           <button

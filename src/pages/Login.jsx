@@ -23,8 +23,8 @@ export default function Login() {
   return (
     <main className="grid min-h-[70vh] place-items-center p-4">
       <section className="rdb-panel w-full max-w-md p-8 text-center">
-        <h1 className="font-mono text-5xl font-bold text-rdb-orange">RUNDATBEAT</h1>
-        <p className="mt-4 font-mono text-rdb-muted">THINK YOU CAN MAKE IT? RUN DAT BEAT.</p>
+        <h1 className="font-mono text-5xl font-bold text-rdb-orange">SAMPLE BATTLE</h1>
+        <p className="mt-4 font-mono text-rdb-muted">THINK YOU CAN MAKE IT? SAMPLE BATTLE.</p>
         <button
           className="rdb-button mt-8 w-full border-rdb-discord bg-rdb-discord text-white"
           type="button"

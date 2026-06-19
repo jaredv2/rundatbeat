@@ -36,7 +36,7 @@ export default function Navbar() {
       <nav className="mx-auto flex min-h-[52px] max-w-[1100px] items-center justify-between gap-4 px-4">
         <Link to="/" className="flex items-center gap-2 font-mono text-sm font-bold uppercase text-rdb-orange">
           <img src="/logo.png" alt="" className="h-5 w-5" />
-          RUNDATBEAT
+          SAMPLE BATTLE
         </Link>
 
         <div className="hidden gap-6 md:flex">

@@ -39,16 +39,16 @@ async function cleanupStaleRooms(userId) {
 
 // Route → title map. Dynamic routes (/battle/:id, /profile/:username) handled separately below.
 const ROUTE_TITLES = {
-  '/':            'RUNDATBEAT — HOME',
-  '/landing':     'RUNDATBEAT — WELCOME',
-  '/login':       'RUNDATBEAT — LOGIN',
-  '/setup':       'RUNDATBEAT — SETUP',
-  '/shop':        'RUNDATBEAT — THE SHOP',
-  '/cosmetics':   'RUNDATBEAT — COSMETICS',
-  '/host':        'RUNDATBEAT — HOST A BATTLE',
-  '/leaderboard': 'RUNDATBEAT — LEADERBOARD',
-  '/settings':    'RUNDATBEAT — SETTINGS',
-  '/admin':       'RUNDATBEAT — ADMIN',
+  '/':            'SAMPLE BATTLE — HOME',
+  '/landing':     'SAMPLE BATTLE — WELCOME',
+  '/login':       'SAMPLE BATTLE — LOGIN',
+  '/setup':       'SAMPLE BATTLE — SETUP',
+  '/shop':        'SAMPLE BATTLE — THE SHOP',
+  '/cosmetics':   'SAMPLE BATTLE — COSMETICS',
+  '/host':        'SAMPLE BATTLE — HOST A BATTLE',
+  '/leaderboard': 'SAMPLE BATTLE — LEADERBOARD',
+  '/settings':    'SAMPLE BATTLE — SETTINGS',
+  '/admin':       'SAMPLE BATTLE — ADMIN',
 };
 
 // Called inside App so it has access to the Router context (useLocation)
@@ -66,18 +66,18 @@ function usePageTitle() {
     // /profile/:username — show the username in the tab
     if (path.startsWith('/profile/')) {
       const username = path.split('/profile/')[1]?.split('/')[0]?.toUpperCase() || '';
-      document.title = username ? `${username} — RUNDATBEAT` : 'RUNDATBEAT — PROFILE';
+      document.title = username ? `${username} — SAMPLE BATTLE` : 'SAMPLE BATTLE — PROFILE';
       return;
     }
 
     // /battle/:id — generic battle title (Battle page loads the real name async)
     if (path.startsWith('/battle/')) {
-      document.title = 'RUNDATBEAT — BATTLE';
+      document.title = 'SAMPLE BATTLE — BATTLE';
       return;
     }
 
     // Fallback
-    document.title = 'RUNDATBEAT';
+    document.title = 'SAMPLE BATTLE';
   }, [location.pathname]);
 }
 
@@ -85,7 +85,7 @@ function MissingConfig() {
   return (
     <main className="grid min-h-screen place-items-center p-4">
       <div className="rdb-panel max-w-xl p-6">
-        <h1 className="font-mono text-3xl text-rdb-orange">RUNDATBEAT</h1>
+        <h1 className="font-mono text-3xl text-rdb-orange">SAMPLE BATTLE</h1>
         <p className="mt-4 text-rdb-muted">Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.</p>
       </div>
     </main>
@@ -122,7 +122,10 @@ export default function App() {
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return undefined; }
-    async function hydrate(session) {
+
+    const initialSessionResolved = { current: false };
+
+    async function hydrate(session, fromInitialSession = false) {
       const sessionKey = session?.access_token || session?.user?.id || null;
       if (sessionKey && sessionKey === lastSessionRef.current) return;
       lastSessionRef.current = sessionKey;
@@ -149,12 +152,29 @@ export default function App() {
       } catch (err) {
         devError('[App] hydrate error:', err);
       } finally {
+        if (fromInitialSession) initialSessionResolved.current = true;
         setAuthReady(true);
       }
     }
-    supabase.auth.getSession().then(({ data }) => hydrate(data.session)).catch(() => setAuthReady(true));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => hydrate(session));
-    return () => listener.subscription.unsubscribe();
+
+    supabase.auth.getSession().then(({ data }) => hydrate(data.session, true)).catch(() => setAuthReady(true));
+
+    const fallbackTimer = setTimeout(() => {
+      if (!initialSessionResolved.current) {
+        initialSessionResolved.current = true;
+        setAuthReady(true);
+      }
+    }, 8000);
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!initialSessionResolved.current) return;
+      hydrate(session);
+    });
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

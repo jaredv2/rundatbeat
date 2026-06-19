@@ -44,7 +44,7 @@ export default function PurchaseModal({ item, open, closedBattles = [], onCancel
   }
 
   const previewProfile = {
-    username: 'RUNDATBEAT',
+    username: 'SAMPLE BATTLE',
     active_name_effect: item.item_type === 'name_effect' ? slugCosmeticName(item.name) : 'wave',
     active_name_color: item.item_type === 'name_color' ? slugCosmeticName(item.name) : 'ember',
     active_theme: 'default',
