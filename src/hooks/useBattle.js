@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { devLog } from '../lib/devLog';
+import { devLog, devError } from '../lib/devLog';
 
 // ── Reconciliation helpers ────────────────────────────────────────────────
 
@@ -78,19 +78,22 @@ export function useBattle(id) {
 
   // ── Resolve the actual battle_id from raw id (could be room UUID or battle UUID) ──
   async function resolveIds(rawId) {
-    const [b, r] = await Promise.all([
+    const [b, r] = await Promise.allSettled([
       supabase.from('battles').select('id').eq('id', rawId).maybeSingle(),
       supabase.from('rooms').select('id, battle_id').eq('id', rawId).maybeSingle(),
     ]);
 
-    if (b?.data) {
-      devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → battle:${b.data.id.slice(0,8)}`, 'color:#a855f7');
-      return { battleId: b.data.id, roomId: null };
+    const battleRes = b.status === 'fulfilled' ? b.value : null;
+    const roomRes = r.status === 'fulfilled' ? r.value : null;
+
+    if (battleRes?.data) {
+      devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → battle:${battleRes.data.id.slice(0,8)}`, 'color:#a855f7');
+      return { battleId: battleRes.data.id, roomId: null };
     }
 
-    if (r?.data) {
-      devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → room:${r.data.id.slice(0,8)} battle:${(r.data.battle_id||'none').slice(0,8)}`, 'color:#a855f7');
-      return { battleId: r.data.battle_id || null, roomId: r.data.id };
+    if (roomRes?.data) {
+      devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → room:${roomRes.data.id.slice(0,8)} battle:${(roomRes.data.battle_id||'none').slice(0,8)}`, 'color:#a855f7');
+      return { battleId: roomRes.data.battle_id || null, roomId: roomRes.data.id };
     }
 
     devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → NOT FOUND`, 'color:#a855f7');
@@ -113,9 +116,9 @@ export function useBattle(id) {
       // Load room + battle + submissions in parallel
       let loadedRoom = null;
       const roomPromise = (ids.roomId
-        ? supabase.from('rooms').select('*').eq('id', ids.roomId).maybeSingle()
+        ? supabase.from('rooms').select('*').eq('id', ids.roomId).maybeSingle().catch(() => ({ data: null }))
         : actualBattleId
-          ? supabase.from('rooms').select('*').eq('battle_id', actualBattleId).maybeSingle()
+          ? supabase.from('rooms').select('*').eq('battle_id', actualBattleId).maybeSingle().catch(() => ({ data: null }))
           : Promise.resolve({ data: null })
       ).then(({ data }) => data ?? null);
 
@@ -133,9 +136,11 @@ export function useBattle(id) {
       loadedRoom = roomResult;
       // Fallback: direct room lookup by raw id
       if (!loadedRoom) {
-        const { data } = await supabase.from('rooms').select('*').eq('id', id).maybeSingle();
-        loadedRoom = data ?? null;
-        if (loadedRoom?.id) roomIdRef.current = loadedRoom.id;
+        try {
+          const { data } = await supabase.from('rooms').select('*').eq('id', id).maybeSingle();
+          loadedRoom = data ?? null;
+          if (loadedRoom?.id) roomIdRef.current = loadedRoom.id;
+        } catch { /* non-UUID id — ignore */ }
       }
       setRoom(prev => mergeObj(prev, loadedRoom));
       roomIdRef.current = loadedRoom?.id ?? roomIdRef.current;
