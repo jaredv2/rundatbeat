@@ -343,12 +343,19 @@ export default function Home() {
         <div className="home-actions">
           <button
             className="rdb-menu-button border-rdb-orange text-rdb-text"
-            disabled={Boolean(queueLobby || currentRoom)}
+            disabled={Boolean(queueLobby)}
             type="button"
-            onClick={() => { playUiSound('click'); setPlayOpen(true); }}
+            onClick={() => {
+              playUiSound('click');
+              if (currentRoom) {
+                navigate(`/battle/${currentRoom.battle_id || currentRoom.id}`);
+              } else {
+                setPlayOpen(true);
+              }
+            }}
           >
             <span>{queueLobby ? 'QUEUED' : currentRoom ? 'IN BATTLE' : 'PLAY'}</span>
-            <small>{queueLobby ? 'IN QUEUE — LEAVE FIRST' : currentRoom ? 'ACTIVE MATCH — LEAVE FIRST' : 'SOLO + RANKED + ROOMS'}</small>
+            <small>{queueLobby ? 'IN QUEUE — LEAVE FIRST' : currentRoom ? 'ACTIVE MATCH — TAP TO REJOIN' : 'SOLO + RANKED + ROOMS'}</small>
           </button>
           <Link className="rdb-menu-button" to="/shop">
             <span>SHOP</span>
@@ -366,6 +373,30 @@ export default function Home() {
       <div className="fixed bottom-4 right-4 z-40 font-mono text-[11px] uppercase text-rdb-muted">
         Active players: <b className="text-rdb-orange">{formatNumber(activePlayers)}</b>
       </div>
+
+      {currentRoom && (
+        <button
+          className="fixed bottom-4 left-4 z-50 rdb-button border-rdb-red text-rdb-red font-mono text-xs"
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            if (!profile?.id) return;
+            setBusy(true);
+            try {
+              await supabase.from('room_members').delete().eq('room_id', currentRoom.id).eq('user_id', profile.id);
+              addToast('FORCE LEFT ROOM');
+              setCurrentRoom(null);
+              await loadHomeStats();
+            } catch {
+              addToast('FORCE LEAVE FAILED', 'error');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          FORCE LEAVE
+        </button>
+      )}
 
       <MatchmakingModal open={playOpen} onClose={() => setPlayOpen(false)} onQueue={handleQueueEnter} />
     </main>

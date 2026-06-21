@@ -344,6 +344,17 @@ async function advanceToClosed(battleId, roomId) {
   log('→CLOSED', 'battle:', battleId, 'room:', roomId);
 
   try {
+  // Bail if battle is already closed (prevents double-processing)
+  const { data: existingBattle } = await supabase
+    .from('battles')
+    .select('status')
+    .eq('id', battleId)
+    .maybeSingle();
+  if (existingBattle?.status === 'closed') {
+    log('→CLOSED', 'SKIP — battle already closed');
+    return;
+  }
+
   const { count: memberCount } = await supabase
     .from('room_members')
     .select('room_id', { count: 'exact' })
