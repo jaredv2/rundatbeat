@@ -1,26 +1,24 @@
 import { supabase } from './supabase';
 
 export const RESTRICTION_POOL = [
-  "No melodies — drums and 808 only alongside the sample",
-  "No 808 — let the sample carry the low end",
   "The beat must feel empty — max 3 elements total including the sample",
   "No hi-hats — kick and snare only",
   "Sample must be pitched down at least 2 semitones from its original pitch",
   "No snare — only kick and hi-hats",
   "No more than one drum element playing at any time",
   "No reverb on anything — everything must sound dry and close",
-  "No kicks — 808 and hi-hats carry the rhythm",
   "The beat must be under 60 seconds — short and punchy",
   "No chord pads or sustained synths — single note leads only",
-  "No bass of any kind — no 808, no sub, no bass synth",
   "Every element must cut out for at least one full bar somewhere in the beat",
   "No samples other than the provided one — all other sounds must be synthesized",
   "The beat must have a full 4 bar intro with no drums — sample only",
   "No more than 2 elements playing simultaneously at any point",
   "Hi-hats must stay on straight 8th notes — no triplets, no rolls",
-  "The 808 must be a different note on every single bar — no repeating patterns",
   "No effects on the sample — use it completely dry, no EQ, no reverb, no compression",
   "The beat must drop to silence for exactly one bar in the middle",
+  "Only use percussion from the sample — chop and rearrange the original sounds",
+  "The beat must switch up completely halfway through — two distinct sections",
+  "No kicks at all — let the snare and hi-hats drive the rhythm",
 ];
 
 export function pickFromPool() {
@@ -41,14 +39,14 @@ export function difficultyFromTier(tier) {
 }
 
 const GENRE_RESTRICTION_GUIDE = {
-  trap: '808 slides/glides, hi-hat rolls (triplets, 1/32), snare/clap patterns, open hat placement, melody loops, dark/bright FX.',
+  trap: 'hi-hat rolls (triplets, 1/32), snare/clap patterns, open hat placement, melody loops, dark/bright FX.',
 };
 
 function bpmHints(bpm) {
   const bpmNum = Number(bpm) || 140;
   if (bpmNum <= 100) return 'slow tempo — consider: half-time drums, spaced-out bass, long melodic phrases, ambient FX.';
   if (bpmNum <= 130) return 'mid tempo — consider: standard grooves, swing, layered percussion, dynamic arrangement.';
-  if (bpmNum <= 155) return 'fast tempo — consider: double-time hi-hats, rapid 808s, energetic transitions, tight quantization.';
+  if (bpmNum <= 155) return 'fast tempo — consider: double-time hi-hats, rapid rolls, energetic transitions, tight quantization.';
   return 'very fast tempo — consider: rapid-fire hats, intense rhythms, aggressive energy, tight fills.';
 }
 

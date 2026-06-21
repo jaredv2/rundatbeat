@@ -90,6 +90,22 @@ export default function Lobby({ room, members, onReadyChange }) {
         <h3 className="font-mono text-[13px] uppercase text-rdb-text">
           {isHost ? 'HOST LOBBY' : 'LOBBY'}
         </h3>
+        <span className="font-mono text-[10px] uppercase text-rdb-muted">{room?.name || 'ROOM'}</span>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 font-mono text-[10px] uppercase text-rdb-muted">
+        {room?.song_length_seconds && (
+          <span className="rounded border border-rdb-border px-2 py-0.5">SONG: {room.song_length_seconds}s</span>
+        )}
+        {room?.challenge?.battleMinutes && (
+          <span className="rounded border border-rdb-border px-2 py-0.5">BATTLE: {room.challenge.battleMinutes}min</span>
+        )}
+        {room?.voting_minutes != null && room.voting_minutes > 0 && (
+          <span className="rounded border border-rdb-border px-2 py-0.5">VOTING: {room.voting_minutes}min</span>
+        )}
+        {room?.mode && (
+          <span className="rounded border border-rdb-orange/30 px-2 py-0.5 text-rdb-orange">{room.mode.toUpperCase()}</span>
+        )}
       </div>
 
       {countdown !== null && (

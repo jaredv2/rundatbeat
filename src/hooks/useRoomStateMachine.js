@@ -82,8 +82,8 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
       const canDriveNow = isOwner || (r?.mode === 'ranked' && !r?.owner_id);
       if (!canDriveNow) return;
 
-      // Auto-close ranked battle when only 1 player remains (not during voting — let it finish)
-      if (!closingRef.current && !isSolo && r?.mode === 'ranked' && b?.id && ['active', 'upcoming'].includes(currentPhase)) {
+      // Auto-close ranked battle when only 1 player remains — only during upcoming phase
+      if (!closingRef.current && !isSolo && r?.mode === 'ranked' && b?.id && currentPhase === 'upcoming') {
         if (_closingGuards.get(b.id) === 'leaving') return;
         const { count } = await supabase.from('room_members').select('room_id', { count: 'exact' }).eq('room_id', r.id);
         if (count <= 1) {

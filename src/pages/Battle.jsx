@@ -526,6 +526,8 @@ export default function Battle() {
     const body = censorProfanity(messageBody.trim().slice(0, 500));
     setMessageBody('');
     try {
+      const { data: roomCheck } = await supabase.from('rooms').select('id').eq('id', room.id).maybeSingle();
+      if (!roomCheck) return;
       const { error } = await supabase
         .from('room_messages')
         .insert({ room_id: room.id, user_id: profile.id, body });
@@ -1289,6 +1291,8 @@ export default function Battle() {
                     disabled={!room}
                     onClick={async () => {
                       if (!profile || !room) return;
+                      const { data: roomCheck } = await supabase.from('rooms').select('id').eq('id', room.id).maybeSingle();
+                      if (!roomCheck) return;
                       await supabase.from('room_messages').insert({ room_id: room.id, user_id: profile.id, body: emoji });
                     }}
                   >

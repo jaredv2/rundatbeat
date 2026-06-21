@@ -133,6 +133,8 @@ export default function SocialHub({ producers = [] }) {
     const body = roomBody.trim();
     setRoomBody('');
     try {
+      const { data: roomCheck } = await supabase.from('rooms').select('id').eq('id', selectedRoom.id).maybeSingle();
+      if (!roomCheck) { addToast('ROOM NO LONGER EXISTS', 'error'); return; }
       const { error } = await supabase.from('room_messages').insert({ room_id: selectedRoom.id, user_id: profile.id, body });
       if (error) throw error;
       loadRoomMessages(selectedRoom.id);
