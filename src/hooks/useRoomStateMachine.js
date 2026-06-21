@@ -569,7 +569,8 @@ async function advanceToClosed(battleId, roomId) {
   }
 
   // ── Record wins/battles_entered for room mode (winner = top-rated submission) ──
-  if (battle?.mode === 'quick' && room?.mode === 'room') {
+  const { data: currentRoom } = await supabase.from('rooms').select('mode').eq('id', roomId).maybeSingle();
+  if (battle?.mode === 'quick' && currentRoom?.mode === 'room') {
     try {
       const { data: roomSubs } = await supabase
         .from('submissions')
