@@ -115,12 +115,19 @@ export function useBattle(id) {
 
       // Load room + battle + submissions in parallel
       let loadedRoom = null;
-      const roomPromise = (ids.roomId
-        ? supabase.from('rooms').select('*').eq('id', ids.roomId).maybeSingle().catch(() => ({ data: null }))
-        : actualBattleId
-          ? supabase.from('rooms').select('*').eq('battle_id', actualBattleId).maybeSingle().catch(() => ({ data: null }))
-          : Promise.resolve({ data: null })
-      ).then(({ data }) => data ?? null);
+      const roomPromise = (async () => {
+        try {
+          if (ids.roomId) {
+            const { data } = await supabase.from('rooms').select('*').eq('id', ids.roomId).maybeSingle();
+            return data;
+          }
+          if (actualBattleId) {
+            const { data } = await supabase.from('rooms').select('*').eq('battle_id', actualBattleId).maybeSingle();
+            return data;
+          }
+          return null;
+        } catch { return null; }
+      })();
 
       const battlePromise = actualBattleId
         ? Promise.all([
@@ -132,8 +139,10 @@ export function useBattle(id) {
           ])
         : Promise.resolve([null, null]);
 
-      const [roomResult, [{ data: battleData }, submissionData]] = await Promise.all([roomPromise, battlePromise]);
+      const [roomResult, battlePair] = await Promise.all([roomPromise, battlePromise]);
       loadedRoom = roomResult;
+      const battleData = battlePair?.[0]?.data ?? null;
+      const submissionData = battlePair?.[1] ?? null;
       // Fallback: direct room lookup by raw id
       if (!loadedRoom) {
         try {
