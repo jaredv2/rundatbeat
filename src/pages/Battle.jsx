@@ -21,6 +21,7 @@ import Spinner from '../components/ui/Spinner';
 import RankUpModal from '../components/ui/RankUpModal';
 import VotingFeed from '../components/voting/VotingFeed';
 import ChallengeReveal from '../components/battle/ChallengeReveal';
+import SkipVoteCard from '../components/battle/SkipVoteCard';
 import WaveformPlayer from '../components/audio/WaveformPlayer';
 import { useBattle } from '../hooks/useBattle';
 import { useRoomStateMachine, markBattleLeaving, clearBattleLeaving } from '../hooks/useRoomStateMachine';
@@ -88,10 +89,18 @@ function SoloTimer({ target }) {
   );
 }
 
-function GetReadyCard({ startsAt }) {
-  const { remaining } = useCountdown(startsAt);
-  if (!startsAt) return null;
-  const secs = Math.ceil((remaining || 0) / 1000);
+function GetReadyCard({ onDone }) {
+  const [secs, setSecs] = useState(5);
+  const doneRef = useRef(false);
+  useEffect(() => {
+    if (secs <= 0 && !doneRef.current) {
+      doneRef.current = true;
+      onDone?.();
+      return;
+    }
+    const t = setTimeout(() => setSecs((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [secs, onDone]);
   return (
     <div className="rdb-panel p-8 text-center space-y-4">
       <Spinner label="GETTING READY" />
@@ -99,7 +108,7 @@ function GetReadyCard({ startsAt }) {
         SUBMISSIONS STARTING IN
       </p>
       <div className="font-mono text-3xl font-bold tracking-widest text-rdb-orange tabular-nums">
-        00:{String(secs % 60).padStart(2, '0')}
+        00:{String(Math.max(0, secs)).padStart(2, '0')}
       </div>
     </div>
   );
@@ -218,6 +227,9 @@ export default function Battle() {
   const [lobbyTransitioning, setLobbyTransitioning] = useState(false);
   const [showGoHome, setShowGoHome] = useState(false);
   const [challengeRevealed, setChallengeRevealed] = useState(false);
+  const [getReadyDone, setGetReadyDone] = useState(false);
+  const [skipVoteActive, setSkipVoteActive] = useState(false);
+  const [skipVoteDone, setSkipVoteDone] = useState(false);
   const chatEndRef = useRef(null);
   const seenMsgIds = useRef(new Set());
   const selfLeaving = useRef(false);
@@ -256,7 +268,12 @@ export default function Battle() {
   }, [phase, battle?.status, room?.status]);
 
   useEffect(() => {
-    if (phase !== 'upcoming') setChallengeRevealed(false);
+    if (phase !== 'upcoming') {
+      setChallengeRevealed(false);
+      setGetReadyDone(false);
+      setSkipVoteActive(false);
+      setSkipVoteDone(false);
+    }
   }, [phase]);
 
   // Browser notification: match almost ended (60s warning)
@@ -781,6 +798,7 @@ export default function Battle() {
   const songSeconds   = room?.song_length_seconds || battle?.song_length_seconds || null;
   const isVotingPhase = phase === 'voting';
   const isRanked      = room?.mode === 'ranked';
+  const useSkipVote   = !isSolo && !isRanked;
   const isOwner       = profile?.id && (room?.owner_id === profile.id || room?.host_id === profile.id);
   const visibleSubmissions = isRanked && phase === 'active'
     ? submissions.filter((s) => s.user_id === profile.id)
@@ -1095,9 +1113,7 @@ export default function Battle() {
         {/* ══ MAIN COLUMN ═══════════════════════════════════════════════════ */}
         <section key={phase} className="space-y-5 phase-fade">
           {phase === 'upcoming' ? (
-            challengeRevealed ? (
-              <GetReadyCard startsAt={battle?.starts_at} />
-            ) : (
+            !challengeRevealed ? (
               <ChallengeReveal
                 challenge={room?.challenge}
                 endsAt={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : battle?.starts_at}
@@ -1107,6 +1123,53 @@ export default function Battle() {
                 roomMode={room?.mode}
                 onRevealed={() => setChallengeRevealed(true)}
               />
+            ) : useSkipVote && !skipVoteDone ? (
+              <SkipVoteCard
+                roomId={room?.id}
+                members={members}
+                profile={profile}
+                challenge={room?.challenge}
+                endsAt={battle?.starts_at ? new Date(new Date(battle.starts_at).getTime() - 5000).toISOString() : null}
+                onResult={async (skip) => {
+                  if (skip) {
+                    playUiSound('phase_change');
+                    addToast('SAMPLE SKIPPED — GENERATING NEW ONE');
+                    setSkipVoteDone(false);
+                    await supabase.from('room_members').update({ skip_vote: null }).eq('room_id', room.id);
+                    try {
+                      const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
+                      const data = await buildChallenge(room?.challenge?.instructionGenre || 'trap');
+                      const sample = data.sample || data;
+                      const payload = buildSamplePayload(sample);
+                      if (room?.challenge?.freeMode) { payload.instructions = ''; payload.restrictionsList = ''; }
+                      await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
+                      if (room.battle_id) {
+                        const now = new Date();
+                        const currentStartsAt = battle?.starts_at ? new Date(battle.starts_at).getTime() : now.getTime();
+                        const newStartsAt = Math.max(currentStartsAt, now.getTime()) + 25_000;
+                        await supabase.from('battles').update({
+                          starts_at: new Date(newStartsAt).toISOString(),
+                          voting_ends_at: new Date(newStartsAt + (room.challenge?.battleMinutes || 30) * 60_000).toISOString(),
+                          bpm: sample.bpm,
+                        }).eq('id', room.battle_id);
+                      }
+                    } catch (err) {
+                      devError('[SkipVote] regenerate failed:', err);
+                      addToast('REGENERATION FAILED', 'error');
+                    }
+                  } else {
+                    playUiSound('success');
+                    addToast('SAMPLE KEPT — LET\'S GO');
+                    setSkipVoteDone(true);
+                  }
+                }}
+              />
+            ) : !getReadyDone ? (
+              <GetReadyCard onDone={() => setGetReadyDone(true)} />
+            ) : (
+              <div className="rdb-panel p-8 text-center space-y-4">
+                <Spinner label="STARTING BATTLE" />
+              </div>
             )
           ) : phase === 'closed' ? (
             <></>
