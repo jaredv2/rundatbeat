@@ -129,7 +129,7 @@ export function useBattle(id) {
           ])
         : Promise.resolve([null, null]);
 
-      const [roomResult, [battleResult, submissionResult]] = await Promise.all([roomPromise, battlePromise]);
+      const [roomResult, [{ data: battleData }, submissionData]] = await Promise.all([roomPromise, battlePromise]);
       loadedRoom = roomResult;
       // Fallback: direct room lookup by raw id
       if (!loadedRoom) {
@@ -141,9 +141,9 @@ export function useBattle(id) {
       roomIdRef.current = loadedRoom?.id ?? roomIdRef.current;
 
       // Set battle + submissions from parallel load
-      if (battleResult) {
-        setBattle(prev => mergeObj(prev, battleResult.data ?? null));
-        setSubmissions(prev => reconcileArray(prev, submissionResult ?? []));
+      if (battleData) {
+        setBattle(prev => mergeObj(prev, battleData));
+        setSubmissions(prev => reconcileArray(prev, submissionData?.data ?? []));
       } else {
         setBattle(null);
         setSubmissions([]);
