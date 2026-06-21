@@ -31,7 +31,7 @@ export function clearBattleLeaving(battleId) {
   }
 }
 
-export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
+export function useRoomStateMachine({ battle, room, profile, members, submissions, onStateChange }) {
   const [phase, setPhase]           = useState(() => derivePhase(battle, room, !!battle));
   const [phaseEndsAt, setPhaseEndsAt] = useState(() => phaseEndTimestamp(derivePhase(battle, room, !!battle), battle, room));
   const [calculatingWinner, setCalculatingWinner] = useState(false);
@@ -44,6 +44,10 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
   const battleWasLoadedRef = useRef(!!battle);
   battleRef.current = battle;
   roomRef.current = room;
+  const membersRef = useRef(members);
+  const submissionsRef = useRef(submissions);
+  membersRef.current = members;
+  submissionsRef.current = submissions;
   if (battle) battleWasLoadedRef.current = true;
 
   const isOwner = Boolean(profile?.id && (room?.owner_id === profile.id || room?.host_id === profile.id));
@@ -122,6 +126,14 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
       }
 
       if (currentPhase === 'active' && b) {
+        if (!isSolo) {
+          const memberCount = membersRef.current?.length || 0;
+          const subCount = submissionsRef.current?.length || 0;
+          if (memberCount > 1 && subCount >= memberCount) {
+            log('TICK', 'all players submitted → advanceToVoting');
+            await advanceToVoting(b.id, r.id, r.voting_minutes);
+          }
+        }
         const votingEndsAt = b.voting_ends_at ? new Date(b.voting_ends_at).getTime() : null;
         if (votingEndsAt && now >= votingEndsAt) {
           if (isSolo) {

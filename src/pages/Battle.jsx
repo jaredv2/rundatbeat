@@ -245,6 +245,8 @@ export default function Battle() {
       battle,
       room,
       profile,
+      members,
+      submissions,
       onStateChange: (newPhase, b, r) => {
         devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] PHASE → ${newPhase}`, 'color:#a855f7', { battle: b?.status, room: r?.status });
         if (newPhase === 'active') {
