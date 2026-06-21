@@ -96,6 +96,28 @@ export function getProfileAccentStyle(profile) {
   };
 }
 
+export function getProfileBannerStyle(profile) {
+  if (profile?.discord_banner) {
+    return { backgroundImage: `url(${profile.discord_banner})`, backgroundSize: 'cover', backgroundPosition: 'center center' };
+  }
+  const accent = profile?.accent_color || getThemeStyle(profile).accent;
+  return {
+    background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 25%, #0a0a0f) 0%, color-mix(in srgb, ${accent} 8%, #0a0a0f) 100%)`,
+  };
+}
+
+export function buildDiscordBannerUrl(userId, bannerHash) {
+  if (!userId || !bannerHash) return null;
+  const ext = bannerHash.startsWith('a_') ? 'gif' : 'png';
+  return `https://cdn.discordapp.com/banners/${userId}/${bannerHash}.${ext}?size=1024`;
+}
+
+export function buildDiscordAvatarUrl(userId, avatarHash) {
+  if (!userId || !avatarHash) return null;
+  const ext = avatarHash.startsWith('a_') ? 'gif' : 'png';
+  return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.${ext}?size=256`;
+}
+
 export function getNameGradientStyle(profile) {
   const nameColor = NAME_COLOR_STYLES[profile?.active_name_color];
   return {

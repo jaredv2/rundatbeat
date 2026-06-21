@@ -13,7 +13,7 @@ function LoginButton() {
     playUiSound('click');
     await supabase?.auth.signInWithOAuth({
       provider: 'discord',
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: window.location.origin, scopes: 'identify' },
     });
   };
   return <button className="rdb-button bg-rdb-discord border-rdb-discord text-white" onClick={login}>Connect with Discord</button>;
@@ -51,7 +51,7 @@ export default function Navbar() {
             <>
               <TokenBadge amount={profile.tokens} />
               <span className="text-rdb-border">|</span>
-              <Link className={`font-mono text-xs uppercase hover:text-rdb-orange ${getNameCosmeticClassName(profile)}`} style={getNameGradientStyle(profile)} to={`/profile/${profile.username}`}>
+              <Link className={`font-mono text-xs uppercase hover:text-rdb-orange ${getNameCosmeticClassName(profile)}`} style={getNameGradientStyle(profile)} to={`/profile/${profile.id}`}>
                 <User className="inline-block align-[-2px]" size={14} /> {profile.username}
               </Link>
               {profile.avatar_url && <img loading="lazy" className="h-6 w-6 rounded border border-rdb-border object-cover" src={profile.avatar_url} alt="" />}
@@ -80,7 +80,7 @@ export default function Navbar() {
             {profile ? (
               <div className="flex flex-col gap-3">
                 <TokenBadge amount={profile.tokens} />
-                <Link className="font-mono text-xs uppercase text-rdb-text hover:text-rdb-orange" to={`/profile/${profile.username}`} onClick={() => setMobileOpen(false)}>
+                <Link className="font-mono text-xs uppercase text-rdb-text hover:text-rdb-orange" to={`/profile/${profile.id}`} onClick={() => setMobileOpen(false)}>
                   <User className="inline-block align-[-2px]" size={14} /> {profile.username}
                 </Link>
                 <div className="flex gap-2">

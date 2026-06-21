@@ -9,6 +9,7 @@ import { getNameCosmeticClassName, getNameGradientStyle, getNameplateEmoji } fro
 import { enterQueue, leaveLobby, startCountdown, advanceLobbyToActive } from '../lib/lobbyService';
 import ChallengeReveal from '../components/battle/ChallengeReveal';
 import Spinner from '../components/ui/Spinner';
+import { Timer, Music, Users, Zap } from 'lucide-react';
 
 function reconcileArray(prev, next, keyFn = (item) => item?.id ?? item?.user_id) {
   if (!next) return prev;
@@ -143,7 +144,7 @@ export default function Lobby() {
         advancing.current = true;
         advanceLobbyToActive(id).then(({ battleId }) => {
           // Cleanup lobby membership after transitioning to battle
-          supabase.from('ranked_lobby_members').delete().eq('user_id', profile.id);
+          supabase.from('ranked_lobby_members').delete().eq('user_id', profile.id).eq('lobby_id', id);
           if (battleId) {
             navigate(`/battle/${battleId}`, { replace: true });
           } else {
@@ -233,90 +234,124 @@ export default function Lobby() {
 
   return (
     <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center py-12">
-      <div className="mx-auto w-full max-w-md space-y-5">
+      <div className="mx-auto w-full max-w-4xl space-y-5 lg:grid lg:grid-cols-[1fr_280px] lg:gap-5 lg:space-y-0">
 
-        {/* ── Header ── */}
-        <div className="text-center">
-          <h1 className="font-mono text-2xl font-bold uppercase text-rdb-text">
-            RANKED MATCH
-          </h1>
-          <p className="mt-1 font-mono text-[11px] uppercase text-rdb-muted">
-            {members.length}/{lobby.max_players} PLAYERS
-            {isMatching && <span className="ml-2 text-rdb-orange blink">SEARCHING</span>}
-            {countdownActive && !isMatching && <span className="ml-2 text-green-400">MATCH FOUND</span>}
-          </p>
-        </div>
-
-        {/* ── Player list (names only) ── */}
-        <div className="rdb-panel p-4">
-          <h2 className="font-mono text-[11px] uppercase text-rdb-orange mb-3">IN LOBBY</h2>
-          <div className="space-y-2">
-            {members.map((m) => {
-              const isSelf = m.user_id === profile?.id;
-              return (
-                <div key={m.user_id} className="flex items-center gap-2">
-                  <span
-                    className="h-6 w-6 rounded-full bg-rdb-surface flex-shrink-0 flex items-center justify-center font-mono text-[10px] font-bold uppercase text-rdb-muted overflow-hidden border border-rdb-border"
-                  >
-                    {m.profiles?.avatar_url
-                      ? <img loading="lazy" src={m.profiles.avatar_url} alt="" className="h-full w-full object-cover" />
-                      : (m.profiles?.username || '?')[0]}
-                  </span>
-                  <span
-                    className={`font-mono text-[12px] uppercase truncate ${getNameCosmeticClassName(m.profiles)}`}
-                    style={getNameGradientStyle(m.profiles)}
-                  >
-                    {m.profiles?.nameplate_icon && <span className="mr-1 text-rdb-orange">{getNameplateEmoji(m.profiles.nameplate_icon)}</span>}
-                    {m.profiles?.username || 'USER'}{isSelf && <span className="text-rdb-muted ml-1 text-[10px]">(YOU)</span>}
-                  </span>
-                </div>
-              );
-            })}
-            {members.length < lobby.max_players && isMatching && (
-              <div className="font-mono text-[10px] uppercase text-rdb-muted italic">
-                WAITING FOR OPPONENT...
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Searching animation ── */}
-        {isMatching && (
-          <div className="rdb-panel p-8 text-center space-y-4">
-            <div className="inline-flex items-center gap-3">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-rdb-orange border-t-transparent" />
-              <span className="font-mono text-[12px] uppercase text-rdb-orange">FINDING OPPONENTS...</span>
-            </div>
-            <div className="flex justify-center gap-1.5">
-              {[0, 1, 2].map((i) => (
-                <span key={i} className="h-2 w-2 rounded-full bg-rdb-orange animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
-              ))}
-            </div>
-            <p className="font-mono text-[10px] uppercase text-rdb-muted">
-              {members.length}/{lobby.max_players} SLOTS FILLED
+        {/* ── Left column: lobby content ── */}
+        <div className="space-y-5">
+          {/* ── Header ── */}
+          <div className="text-center">
+            <h1 className="font-mono text-2xl font-bold uppercase text-rdb-text">
+              RANKED MATCH
+            </h1>
+            <p className="mt-1 font-mono text-[11px] uppercase text-rdb-muted">
+              {members.length}/{lobby.max_players} PLAYERS
+              {isMatching && <span className="ml-2 text-rdb-orange blink">SEARCHING</span>}
+              {countdownActive && !isMatching && <span className="ml-2 text-green-400">MATCH FOUND</span>}
             </p>
           </div>
-        )}
 
-        {/* ── Countdown ── */}
-        {countdownActive && !isMatching && (
-          <ChallengeReveal
-            challenge={lobby.challenge}
-            endsAt={lobby.countdown_started_at ? new Date(new Date(lobby.countdown_started_at).getTime() + 5000).toISOString() : null}
-            hideChallenge
-          />
-        )}
+          {/* ── Player list (names only) ── */}
+          <div className="rdb-panel p-4">
+            <h2 className="font-mono text-[11px] uppercase text-rdb-orange mb-3">IN LOBBY</h2>
+            <div className="space-y-2">
+              {members.map((m) => {
+                const isSelf = m.user_id === profile?.id;
+                return (
+                  <div key={m.user_id} className="flex items-center gap-2">
+                    <span
+                      className="h-6 w-6 rounded-full bg-rdb-surface flex-shrink-0 flex items-center justify-center font-mono text-[10px] font-bold uppercase text-rdb-muted overflow-hidden border border-rdb-border"
+                    >
+                      {m.profiles?.avatar_url
+                        ? <img loading="lazy" src={m.profiles.avatar_url} alt="" className="h-full w-full object-cover" />
+                        : (m.profiles?.username || '?')[0]}
+                    </span>
+                    <span
+                      className={`font-mono text-[12px] uppercase truncate ${getNameCosmeticClassName(m.profiles)}`}
+                      style={getNameGradientStyle(m.profiles)}
+                    >
+                      {m.profiles?.nameplate_icon && <span className="mr-1 text-rdb-orange">{getNameplateEmoji(m.profiles.nameplate_icon)}</span>}
+                      {m.profiles?.username || 'USER'}{isSelf && <span className="text-rdb-muted ml-1 text-[10px]">(YOU)</span>}
+                    </span>
+                  </div>
+                );
+              })}
+              {members.length < lobby.max_players && isMatching && (
+                <div className="font-mono text-[10px] uppercase text-rdb-muted italic">
+                  WAITING FOR OPPONENT...
+                </div>
+              )}
+            </div>
+          </div>
 
-        {/* ── Leave ── */}
-        <div className="text-center">
-          <button
-            className="rdb-button border-rdb-red text-rdb-red font-mono text-[12px] uppercase"
-            disabled={leaving || (countdownActive && countdown !== null && countdown > 1)}
-            onClick={handleLeave}
-            type="button"
-          >
-            {leaving ? 'LEAVING...' : 'LEAVE'}
-          </button>
+          {/* ── Searching animation ── */}
+          {isMatching && (
+            <div className="rdb-panel p-8 text-center space-y-4">
+              <div className="inline-flex items-center gap-3">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-rdb-orange border-t-transparent" />
+                <span className="font-mono text-[12px] uppercase text-rdb-orange">FINDING OPPONENTS...</span>
+              </div>
+              <div className="flex justify-center gap-1.5">
+                {[0, 1, 2].map((i) => (
+                  <span key={i} className="h-2 w-2 rounded-full bg-rdb-orange animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                ))}
+              </div>
+              <p className="font-mono text-[10px] uppercase text-rdb-muted">
+                {members.length}/{lobby.max_players} SLOTS FILLED
+              </p>
+            </div>
+          )}
+
+          {/* ── Countdown ── */}
+          {countdownActive && !isMatching && (
+            <ChallengeReveal
+              challenge={lobby.challenge}
+              endsAt={lobby.countdown_started_at ? new Date(new Date(lobby.countdown_started_at).getTime() + 5000).toISOString() : null}
+              hideChallenge
+            />
+          )}
+
+          {/* ── Leave ── */}
+          <div className="text-center">
+            <button
+              className="rdb-button border-rdb-red text-rdb-red font-mono text-[12px] uppercase"
+              disabled={leaving || (countdownActive && countdown !== null && countdown > 1)}
+              onClick={handleLeave}
+              type="button"
+            >
+              {leaving ? 'LEAVING...' : 'LEAVE'}
+            </button>
+          </div>
+        </div>
+
+        {/* ── Right column: match details ── */}
+        <div className="space-y-3 lg:sticky lg:top-24 lg:self-start">
+          <div className="rdb-panel p-4">
+            <h2 className="font-mono text-[11px] uppercase text-rdb-orange mb-3">MATCH DETAILS</h2>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase text-rdb-muted"><Music size={12} />Song Length</span>
+                <span className="font-mono text-[11px] uppercase text-rdb-text">90s</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase text-rdb-muted"><Timer size={12} />Battle Time</span>
+                <span className="font-mono text-[11px] uppercase text-rdb-text">15min</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase text-rdb-muted"><Zap size={12} />Voting</span>
+                <span className="font-mono text-[11px] uppercase text-rdb-text">3min</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase text-rdb-muted"><Users size={12} />Players</span>
+                <span className="font-mono text-[11px] uppercase text-rdb-text">{lobby.max_players}</span>
+              </div>
+            </div>
+          </div>
+          <div className="rdb-panel p-4">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase text-rdb-muted">MODE</span>
+              <span className="border border-rdb-orange px-1.5 py-0.5 font-mono text-[10px] uppercase text-rdb-orange">RANKED</span>
+            </div>
+          </div>
         </div>
 
       </div>

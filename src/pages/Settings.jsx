@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { uploadAvatar } from '../lib/storage';
 import { supabase } from '../lib/supabase';
+import { fetchDiscordProfile, buildDiscordPatch } from '../lib/discord';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
 
@@ -44,6 +45,21 @@ export default function Settings() {
     navigate('/landing', { replace: true });
   }
 
+  async function syncDiscordBanner() {
+    try {
+      const discord = await fetchDiscordProfile();
+      if (!discord) throw new Error('Could not connect to Discord');
+      const patch = buildDiscordPatch(user.id, discord, profile);
+      if (!patch || !Object.keys(patch).length) throw new Error('No Discord data found');
+      const { error } = await supabase.from('profiles').update(patch).eq('id', user.id);
+      if (error) throw error;
+      await refreshProfile();
+      addToast('DISCORD PROFILE SYNCED');
+    } catch (error) {
+      addToast(error.message || 'SYNC FAILED', 'error');
+    }
+  }
+
   return (
     <main className="rdb-container-narrow">
       <form className="rdb-panel space-y-5 p-5" onSubmit={saveProfile}>
@@ -72,6 +88,12 @@ export default function Settings() {
         <div className="flex justify-end gap-2">
           <button className="rdb-button" type="button" onClick={() => navigate(-1)}>Cancel</button>
           <button className="rdb-button rdb-button-primary" disabled={busy} type="submit">{busy ? 'Saving...' : 'Save Settings'}</button>
+        </div>
+
+        <div className="border-t border-rdb-border pt-4">
+          <button className="rdb-button w-full" type="button" onClick={syncDiscordBanner}>SYNC DISCORD PROFILE</button>
+          <p className="mt-2 font-mono text-[10px] uppercase text-rdb-muted text-center">Pull banner, avatar, and username from Discord</p>
+          <p className="mt-1 font-mono text-[10px] uppercase text-rdb-orange text-center">If not working, logout and login again first</p>
         </div>
       </form>
     </main>

@@ -392,7 +392,7 @@ export default function Admin() {
               {topElo.map((user, i) => (
                 <tr key={user.id} className="h-8 border-t border-rdb-border">
                   <td className="font-mono text-xs text-rdb-muted">{i + 1}</td>
-                  <td><Link className="font-mono text-sm hover:text-rdb-orange" to={`/profile/${user.username}`}>{user.username}</Link></td>
+                  <td><Link className="font-mono text-sm hover:text-rdb-orange" to={`/profile/${user.id}`}>{user.username}</Link></td>
                   <td className="font-mono text-sm text-rdb-orange">{formatNumber(user.elo || 0)}</td>
                   <td className="font-mono text-xs uppercase" style={{ color: TIER_COLORS[user.rank_tier] || '#fff' }}>{user.rank_tier || 'bronze'}</td>
                   <td className="font-mono text-sm">{user.wins || 0}</td>
@@ -525,7 +525,7 @@ function Empty({ label }) {
 }
 
 function PlayerLine({ user }) {
-  return <Link className="rounded border border-rdb-border bg-rdb-surface p-3 font-mono text-[11px] uppercase hover:border-rdb-orange" to={`/profile/${user.username}`}>{user.username} - {user.rank_tier || 'bronze'}</Link>;
+  return <Link className="rounded border border-rdb-border bg-rdb-surface p-3 font-mono text-[11px] uppercase hover:border-rdb-orange" to={`/profile/${user.id}`}>{user.username} - {user.rank_tier || 'bronze'}</Link>;
 }
 
 function UserAdjust({ user, onAdjust, onBan, onUnban, onRemoveCustoms }) {
@@ -533,7 +533,7 @@ function UserAdjust({ user, onAdjust, onBan, onUnban, onRemoveCustoms }) {
   const banned = user.banned_until && new Date(user.banned_until).getTime() > Date.now();
   return (
     <div className="grid gap-2 border-t border-rdb-border py-3 md:grid-cols-[1fr_80px_100px_90px_90px_90px_90px] md:items-center">
-      <Link className="font-mono hover:text-rdb-orange" to={`/profile/${user.username}`}>{user.username}</Link>
+      <Link className="font-mono hover:text-rdb-orange" to={`/profile/${user.id}`}>{user.username}</Link>
       <span>{user.wins} wins</span>
       <span><TokenBadge amount={user.tokens} /></span>
       <input className="rdb-input" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="+/-" />

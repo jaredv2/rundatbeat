@@ -73,6 +73,8 @@ export function useBattle(id) {
   const [subscribedRoomId, setSubscribedRoomId] = useState(null);
   const refreshingRef = useRef(false);
   const loadedRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES = 5;
 
   // ── Resolve the actual battle_id from raw id (could be room UUID or battle UUID) ──
   async function resolveIds(rawId) {
@@ -194,7 +196,12 @@ export function useBattle(id) {
       setSubscribedRoomId(roomIdRef.current);
       loadedRef.current = true;
     } catch (err) {
-      // refresh error — keep loading true, polling will retry
+      devError('[BATTLE] refresh error:', err);
+      retryCountRef.current += 1;
+      if (retryCountRef.current >= MAX_RETRIES) {
+        loadedRef.current = true;
+        setLoading(false);
+      }
     } finally {
       refreshingRef.current = false;
       if (loadedRef.current) setLoading(false);

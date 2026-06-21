@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { fetchDiscordProfile, buildDiscordPatch } from '../lib/discord';
 import { validateUsername } from '../lib/validators';
 import { useAuthStore } from '../store/authStore';
 
@@ -26,11 +27,14 @@ export default function Setup() {
       return;
     }
     const meta = user.user_metadata || {};
+    const discord = await fetchDiscordProfile();
+    const discordPatch = buildDiscordPatch(user.id, discord) || {};
     const row = {
       id: user.id,
       username,
-      avatar_url: meta.avatar_url || meta.picture,
-      discord_username: meta.full_name || meta.name || meta.preferred_username,
+      ...discordPatch,
+      avatar_url: discordPatch.avatar_url || meta.avatar_url || meta.picture,
+      discord_username: discordPatch.discord_username || meta.full_name || meta.name || meta.preferred_username,
     };
     const { data, error: insertError } = await supabase.from('profiles').insert(row).select('*').single();
     if (insertError) setError(insertError.message);

@@ -10,8 +10,8 @@ export default function Login() {
     const { error } = await supabase?.auth.signInWithOAuth({
       provider: 'discord',
       options: {
-        // Explicit /auth/callback path — matches what you whitelist in Supabase + Discord
         redirectTo,
+        scopes: 'identify',
       },
     });
 

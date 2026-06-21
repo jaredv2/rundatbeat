@@ -142,7 +142,7 @@ export default function Leaderboard() {
                   <td className="py-3.5">
                     <Link
                       className={`hover:underline ${getNameCosmeticClassName(user)} text-lg`}
-                      to={`/profile/${user.username}`}
+                      to={`/profile/${user.id}`}
                       style={getNameGradientStyle(user)}
                     >
                       {user.nameplate_icon && (

@@ -80,16 +80,26 @@ export default function FriendsDock() {
   useEffect(() => {
     // Only the CHALLENGER auto-navigates when a battle_id appears.
     // The accepter already navigates from createChallengeBattle.
+    if (activeGame) return;
     const acc = challenges.find(
       (c) => c.status === 'accepted' && c.battle_id &&
         c.challenger_id === profile?.id
     );
     if (acc) {
-      devLog('[1v1] challenger auto-navigating to battle', { battle_id: acc.battle_id });
-      setOpen(false);
-      navigate(`/battle/${acc.battle_id}`);
+      // Verify the room still exists before navigating
+      supabase.from('rooms').select('id').eq('id', acc.battle_id).maybeSingle()
+        .then(({ data }) => {
+          if (data) {
+            devLog('[1v1] challenger auto-navigating to battle', { battle_id: acc.battle_id });
+            setOpen(false);
+            navigate(`/battle/${acc.battle_id}`);
+          } else {
+            devLog('[1v1] stale challenge — room deleted, cleaning up', { battle_id: acc.battle_id });
+            supabase.from('challenges').update({ status: 'declined' }).eq('id', acc.id);
+          }
+        });
     }
-  }, [challenges, profile?.id]);
+  }, [challenges, profile?.id, activeGame, navigate]);
 
   useEffect(() => {
     if (!profile) return;
@@ -476,7 +486,7 @@ export default function FriendsDock() {
                             <button className="font-mono text-[9px] uppercase text-rdb-orange hover:text-orange-300" type="button" onClick={(e) => { e.stopPropagation(); sendChallenge(friend.id); }}>1V1 ME</button>
                           );
                         })()}
-                        <Link className="font-mono text-[9px] uppercase text-rdb-muted hover:text-rdb-orange" to={`/profile/${friend.username}`} onClick={(e) => e.stopPropagation()}>VIEW</Link>
+                        <Link className="font-mono text-[9px] uppercase text-rdb-muted hover:text-rdb-orange" to={`/profile/${friend.id}`} onClick={(e) => e.stopPropagation()}>VIEW</Link>
                       </div>
                     </div>
                   );

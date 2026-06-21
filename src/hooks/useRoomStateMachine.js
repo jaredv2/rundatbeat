@@ -530,6 +530,62 @@ async function advanceToClosed(battleId, roomId) {
     }
   }
 
+  // ── Record wins/battles_entered for solo mode ──
+  if (battle?.mode === 'solo') {
+    try {
+      const { data: soloMembers } = await supabase
+        .from('room_members')
+        .select('user_id')
+        .eq('room_id', roomId);
+      const userIds = (soloMembers || []).map(m => m.user_id);
+      if (userIds.length) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, wins, battles_entered')
+          .in('id', userIds);
+        for (const p of profiles || []) {
+          await supabase.from('profiles').update({
+            wins: (p.wins || 0) + 1,
+            battles_entered: (p.battles_entered || 0) + 1,
+          }).eq('id', p.id);
+          log('SOLO WIN', p.id.slice(0, 8));
+        }
+      }
+    } catch (err) {
+      log('SOLO WIN', 'ERROR:', err.message);
+    }
+  }
+
+  // ── Record wins/battles_entered for room mode (winner = top-rated submission) ──
+  if (battle?.mode === 'quick' && room?.mode === 'room') {
+    try {
+      const { data: roomSubs } = await supabase
+        .from('submissions')
+        .select('user_id, rating_total')
+        .eq('battle_id', battleId)
+        .order('rating_total', { ascending: false });
+      if (roomSubs?.length) {
+        const winnerUserId = roomSubs[0].user_id;
+        await supabase.from('battles').update({ winner_id: winnerUserId }).eq('id', battleId).is('winner_id', null);
+        const allUserIds = [...new Set(roomSubs.map(s => s.user_id))];
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, wins, battles_entered')
+          .in('id', allUserIds);
+        for (const p of profiles || []) {
+          const isWinner = p.id === winnerUserId;
+          await supabase.from('profiles').update({
+            wins: (p.wins || 0) + (isWinner ? 1 : 0),
+            battles_entered: (p.battles_entered || 0) + 1,
+          }).eq('id', p.id);
+        }
+        log('ROOM WIN', 'winner:', winnerUserId.slice(0, 8), '| players:', allUserIds.length);
+      }
+    } catch (err) {
+      log('ROOM WIN', 'ERROR:', err.message);
+    }
+  }
+
   // ── Grant XP to all participants ──
   const tXp = Date.now();
   try {

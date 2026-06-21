@@ -138,11 +138,6 @@ export async function dispatchRoomEvent({ roomId, eventType, payload = {} }) {
     await supabase.from('rooms').delete().eq('id', roomId);
   }
 
-  // Insert event for realtime delivery
-  await supabase.from('room_events').insert({
-    room_id: roomId,
-    sender_id: user.id,
-    event_type: eventType,
-    payload,
-  });
+  // room_events insert skipped — RLS blocks direct client inserts.
+  // State changes above propagate via room_members/rooms/battles subscriptions.
 }

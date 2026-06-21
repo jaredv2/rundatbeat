@@ -18,6 +18,9 @@ const DEFAULT_ROOM_SETUP = {
   maxPlayers: 4,
   soloDifficulty: 'medium',
   allowRestrictions: true,
+  freeMode: false,
+  freeTimer: 15,
+  freeModeTab: 'solo',
 };
 
 export default function MatchmakingModal({ open, onClose, onQueue }) {
@@ -110,6 +113,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
         votingMinutes: setup.votingMinutes,
         name: roomSetup.name,
         allowRestrictions: roomSetup.allowRestrictions,
+        freeMode: roomSetup.freeMode,
       });
       addToast('ROOM CREATED');
       onClose();
@@ -178,6 +182,89 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
     }
   }
 
+  async function startFreeSolo() {
+    playUiSound('click');
+    if (!profile || status === 'busy') return;
+    setStatus('busy');
+
+    try {
+      const durationMin = roomSetup.freeTimer;
+      const { data: battle, error: battleError } = await supabase.from('battles').insert({
+        title: 'FREE PLAY',
+        prompt_text: '',
+        genre: 'trap',
+        mood: '',
+        restrictions: '',
+        reference_artists: [],
+        flavor_text: '',
+        duration_minutes: durationMin,
+        song_length_seconds: 60,
+        mode: 'solo',
+        status: 'upcoming',
+        starts_at: null,
+        voting_ends_at: null,
+        created_by: profile.id,
+      }).select('id').single();
+      if (battleError) throw battleError;
+
+      const { data: room, error: roomError } = await supabase.from('rooms').insert({
+        name: 'FREE PLAY',
+        owner_id: profile.id,
+        battle_id: battle.id,
+        status: 'locked',
+        max_players: 1,
+        current_players: 1,
+        mode: 'solo',
+        battle_starts_in_seconds: 0,
+        song_length_seconds: 60,
+        voting_minutes: 0,
+        is_public: false,
+        challenge: null,
+      }).select('*').single();
+      if (roomError) throw roomError;
+
+      const { error: membersErr } = await supabase.from('room_members').upsert({
+        room_id: room.id,
+        user_id: profile.id,
+        role: 'owner',
+      });
+      if (membersErr) throw membersErr;
+
+      addToast('FREE SESSION CREATED');
+      onClose();
+      navigate(`/battle/${battle.id}?difficulty=free`);
+    } catch (error) {
+      addToast(error.message || 'FREE START FAILED', 'error');
+    } finally {
+      setStatus('idle');
+    }
+  }
+
+  async function startFreeRoom() {
+    playUiSound('click');
+    if (!profile || status === 'busy') return;
+    setStatus('busy');
+    try {
+      const { room } = await createRoom({
+        isPublic: true,
+        hostId: profile.id,
+        maxPlayers: roomSetup.maxPlayers,
+        battleMinutes: roomSetup.freeTimer,
+        songLengthSeconds: 60,
+        votingMinutes: 3,
+        name: `FREE ROOM OF ${profile.username?.toUpperCase() || 'HOST'}`,
+        allowRestrictions: false,
+        freeMode: true,
+      });
+      addToast('FREE ROOM CREATED');
+      onClose();
+      navigate(`/battle/${room.id}`);
+    } catch (error) {
+      setStatus('idle');
+      addToast(error.message || 'ROOM CREATE FAILED', 'error');
+    }
+  }
+
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-center overflow-y-auto bg-black/70 p-4 py-8 backdrop-blur-xl">
       <section className="apple-modal my-auto w-full max-w-2xl">
@@ -189,9 +276,10 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
           <button className="apple-icon-button" type="button" onClick={() => { playUiSound('cancel'); onClose(); }}><X size={16} /></button>
         </div>
 
-        <div className="mt-6 grid grid-cols-3 rounded-lg bg-rdb-bg/60 p-1">
+        <div className="mt-6 grid grid-cols-4 rounded-lg bg-rdb-bg/60 p-1">
           {[
             ['ranked', 'Ranked'],
+            ['free', 'Free'],
             ['solo', 'Solo'],
             ['rooms', 'Rooms'],
           ].map(([value, label]) => (
@@ -201,7 +289,93 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
           ))}
         </div>
 
-        {tab === 'solo' ? (
+        {tab === 'free' ? (
+          <div className="mt-6 grid gap-4 md:grid-cols-[1fr_220px]">
+            <div className="rounded-lg border border-rdb-border bg-rdb-bg/70 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-rdb-text">
+                <Wand2 size={15} />Free Mode
+              </div>
+              <p className="mt-2 font-mono text-[10px] uppercase text-rdb-text/50">
+                No instructions, just a sample and a timer. Regenerate whenever you want.
+              </p>
+
+              <div className="mt-4 flex gap-2">
+                {[
+                  { value: 'solo', label: 'Solo' },
+                  { value: 'rooms', label: 'Rooms' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`flex-1 rounded-lg border p-2 text-center font-mono text-[11px] uppercase transition ${roomSetup.freeModeTab === opt.value ? 'border-rdb-orange bg-rdb-orange/10 text-rdb-orange' : 'border-rdb-border bg-rdb-bg/50 text-rdb-muted hover:border-rdb-orange/50'}`}
+                    onClick={() => { playUiSound('click'); updateRoomSetup('freeModeTab', opt.value); }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 border border-rdb-border bg-rdb-bg/50 p-3">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Timer size={13} />Timer</span>
+                  <input
+                    className="w-16 rounded border border-rdb-border bg-rdb-bg px-2 py-0.5 font-mono text-xs text-rdb-text text-center"
+                    type="number"
+                    min="1"
+                    max="120"
+                    step="5"
+                    value={roomSetup.freeTimer}
+                    onChange={(event) => {
+                      const raw = event.target.value;
+                      if (raw === '') { updateRoomSetup('freeTimer', ''); return; }
+                      const n = Number(raw);
+                      if (!isNaN(n) && n >= 1) updateRoomSetup('freeTimer', Math.min(120, n));
+                    }}
+                  />
+                  <span className="font-mono text-[10px] text-rdb-text/50">min</span>
+                </div>
+                <input
+                  className="w-full accent-rdb-orange"
+                  type="range"
+                  min="1"
+                  max="120"
+                  step="5"
+                  value={roomSetup.freeTimer}
+                  onChange={(event) => updateRoomSetup('freeTimer', Number(event.target.value))}
+                />
+                <div className="flex justify-between font-mono text-[9px] uppercase text-rdb-text/40">
+                  <span>1 min</span><span>2 hrs</span>
+                </div>
+              </div>
+
+              {roomSetup.freeModeTab === 'rooms' && (
+                <div className="mt-3 border border-rdb-border bg-rdb-bg/50 p-3">
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="flex items-center gap-1 font-mono text-[10px] uppercase text-rdb-text/50"><Users size={13} />Max Players: {roomSetup.maxPlayers}</span>
+                    <input
+                      className="w-full accent-rdb-orange"
+                      type="range"
+                      min="2"
+                      max="10"
+                      step="1"
+                      value={roomSetup.maxPlayers}
+                      onChange={(event) => updateRoomSetup('maxPlayers', Number(event.target.value))}
+                    />
+                    <div className="flex justify-between font-mono text-[9px] uppercase text-rdb-text/40">
+                      <span>2</span><span>10</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-2 self-stretch">
+              <button className="apple-primary-action" disabled={status === 'busy' || !roomSetup.freeTimer} type="button" onClick={roomSetup.freeModeTab === 'solo' ? startFreeSolo : startFreeRoom}>
+                {status === 'busy' ? 'Creating...' : roomSetup.freeModeTab === 'solo' ? 'Start Free Solo' : 'Create Free Room'}
+              </button>
+            </div>
+          </div>
+        ) : tab === 'solo' ? (
           <div className="mt-6 grid gap-4 md:grid-cols-[1fr_220px]">
             <div className="rounded-lg border border-rdb-border bg-rdb-bg/70 p-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-rdb-text">
@@ -427,7 +601,7 @@ export default function MatchmakingModal({ open, onClose, onQueue }) {
                   </div>
                 </div>
 
-                <div className="flex gap-4 mt-1">
+                <div className="flex gap-4 mt-1 flex-wrap">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"

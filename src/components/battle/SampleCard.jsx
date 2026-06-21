@@ -7,6 +7,7 @@ export default function SampleCard({ challenge, phase, room, hideDetails }) {
 
   const isVoting = phase === 'voting';
   const allowRestrictions = room?.challenge?.allowRestrictions !== false;
+  const isFreeMode = room?.challenge?.freeMode === true || (!challenge.instructions && !challenge.restrictionsList && !challenge.instructionGenre);
 
   const handleCopyLink = async () => {
     if (!challenge.youtube_url) return;
@@ -91,7 +92,7 @@ export default function SampleCard({ challenge, phase, room, hideDetails }) {
         )}
       </div>
 
-      {!hideDetails && (
+      {!hideDetails && !isFreeMode && (
         <>
           <div className="mt-3 rounded-lg border border-rdb-orange/30 bg-rdb-orange/5 p-3">
             <p className="font-mono text-[10px] uppercase text-rdb-orange mb-1">INSTRUCTIONS</p>

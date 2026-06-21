@@ -18,7 +18,7 @@ function VoteCardInner({ submission, rank, currentUserId }) {
         <div>
           <div className={`font-mono text-xs ${style ? style.labelColor : 'text-rdb-muted'}`}>RANK #{rank}</div>
           <div className="flex items-center gap-2">
-            <Link className="font-mono text-xl uppercase text-rdb-text hover:underline" to={submission.profiles?.username ? `/profile/${submission.profiles.username}` : '#'}>{submission.profiles?.username || 'UNKNOWN'}</Link>
+            <Link className="font-mono text-xl uppercase text-rdb-text hover:underline" to={submission.user_id ? `/profile/${submission.user_id}` : '#'}>{submission.profiles?.username || 'UNKNOWN'}</Link>
             {isSelf && <span className="font-mono text-[11px] text-rdb-orange">(YOU)</span>}
           </div>
         </div>

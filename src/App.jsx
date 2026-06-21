@@ -11,9 +11,11 @@ import Spinner from './components/ui/Spinner';
 import { useNotifications } from './hooks/useNotifications';
 import { grantDailyLogin } from './lib/tokenHelpers';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { fetchDiscordProfile, buildDiscordPatch } from './lib/discord';
 import { useAuthStore } from './store/authStore';
 import { useUiStore } from './store/uiStore';
 import { playUiSound } from './lib/sfx';
+import { requestNotificationPermission } from './lib/notifications';
 import './lib/debug';
 
 async function cleanupStaleRooms(userId) {
@@ -63,10 +65,9 @@ function usePageTitle() {
       return;
     }
 
-    // /profile/:username — show the username in the tab
+    // /profile/:userId — show generic profile title
     if (path.startsWith('/profile/')) {
-      const username = path.split('/profile/')[1]?.split('/')[0]?.toUpperCase() || '';
-      document.title = username ? `${username} — SAMPLE BATTLE` : 'SAMPLE BATTLE — PROFILE';
+      document.title = 'SAMPLE BATTLE — PROFILE';
       return;
     }
 
@@ -127,7 +128,8 @@ export default function App() {
 
     async function hydrate(session, fromInitialSession = false) {
       const sessionKey = session?.access_token || session?.user?.id || null;
-      if (sessionKey && sessionKey === lastSessionRef.current) return;
+      if (sessionKey === lastSessionRef.current) return;
+      if (!sessionKey && lastSessionRef.current) return;
       lastSessionRef.current = sessionKey;
       try {
         setSession(session);
@@ -143,6 +145,17 @@ export default function App() {
             dailyLoginCheckedRef.current = true;
             const granted = shouldCheckDaily ? await grantDailyLogin(profile) : false;
             if (granted) addToast('+3 RDB DAILY LOGIN');
+            if (!profile.discord_id && !profile.discord_banner) {
+              fetchDiscordProfile().then((discord) => {
+                if (discord) {
+                  const patch = buildDiscordPatch(session.user.id, discord, profile);
+                  if (patch && Object.keys(patch).length) {
+                    supabase.from('profiles').update(patch).eq('id', profile.id);
+                  }
+                }
+              }).catch(() => {});
+            }
+            requestNotificationPermission().catch(() => {});
           } else if (location.pathname !== '/setup') {
             navigate('/setup');
           }

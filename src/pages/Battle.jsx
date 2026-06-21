@@ -40,6 +40,7 @@ import { toggleReady, startCountdown, startSoloSession, deleteRoom as deleteRoom
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
 import { playUiSound } from '../lib/sfx';
+import { sendBrowserNotification } from '../lib/notifications';
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -83,6 +84,23 @@ function SoloTimer({ target }) {
       >
         {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
       </span>
+    </div>
+  );
+}
+
+function GetReadyCard({ startsAt }) {
+  const { remaining } = useCountdown(startsAt);
+  if (!startsAt) return null;
+  const secs = Math.ceil((remaining || 0) / 1000);
+  return (
+    <div className="rdb-panel p-8 text-center space-y-4">
+      <Spinner label="GETTING READY" />
+      <p className="font-mono text-[11px] uppercase text-rdb-muted">
+        SUBMISSIONS STARTING IN
+      </p>
+      <div className="font-mono text-3xl font-bold tracking-widest text-rdb-orange tabular-nums">
+        00:{String(secs % 60).padStart(2, '0')}
+      </div>
     </div>
   );
 }
@@ -199,6 +217,7 @@ export default function Battle() {
   const [countdown, setCountdown] = useState(null);
   const [lobbyTransitioning, setLobbyTransitioning] = useState(false);
   const [showGoHome, setShowGoHome] = useState(false);
+  const [challengeRevealed, setChallengeRevealed] = useState(false);
   const chatEndRef = useRef(null);
   const seenMsgIds = useRef(new Set());
   const selfLeaving = useRef(false);
@@ -216,8 +235,17 @@ export default function Battle() {
       profile,
       onStateChange: (newPhase, b, r) => {
         devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] PHASE → ${newPhase}`, 'color:#a855f7', { battle: b?.status, room: r?.status });
-        if (newPhase === 'active') playUiSound('phase_change');
-        if (newPhase === 'voting') playUiSound('phase_change');
+        if (newPhase === 'active') {
+          playUiSound('phase_change');
+          sendBrowserNotification('MATCH STARTED', { body: 'Submissions are now open! Go make your beat.', tag: 'battle-active', onClick: () => window.focus() });
+        }
+        if (newPhase === 'voting') {
+          playUiSound('phase_change');
+          sendBrowserNotification('VOTING STARTED', { body: 'Time to vote! Listen and rate the beats.', tag: 'battle-voting', onClick: () => window.focus() });
+        }
+        if (newPhase === 'closed') {
+          sendBrowserNotification('VOTING ENDED', { body: 'The battle is over! Check the results.', tag: 'battle-closed', onClick: () => window.focus() });
+        }
       },
     });
 
@@ -226,6 +254,38 @@ export default function Battle() {
       devLog('[Battle] STATE MACHINE — phase:', phase, { battleStatus: battle?.status, roomStatus: room?.status });
     }
   }, [phase, battle?.status, room?.status]);
+
+  useEffect(() => {
+    if (phase !== 'upcoming') setChallengeRevealed(false);
+  }, [phase]);
+
+  // Browser notification: match almost ended (60s warning)
+  const matchEndWarned = useRef(false);
+  useEffect(() => {
+    if (!battle || (phase !== 'active' && phase !== 'voting')) { matchEndWarned.current = false; return; }
+    const target = phase === 'active' ? battle.voting_ends_at : null;
+    if (!target) return;
+    const interval = setInterval(() => {
+      const remaining = new Date(target).getTime() - Date.now();
+      if (remaining <= 60_000 && remaining > 0 && !matchEndWarned.current) {
+        matchEndWarned.current = true;
+        sendBrowserNotification('MATCH ALMOST ENDED', { body: 'Less than 1 minute remaining!', tag: 'battle-ending', onClick: () => window.focus() });
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [phase, battle?.voting_ends_at]);
+
+  // Browser notification: room message received from someone else
+  const lastNotifiedMsgRef = useRef(null);
+  useEffect(() => {
+    if (!messages?.length || !profile) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.user_id === profile.id) return;
+    if (last.id === lastNotifiedMsgRef.current) return;
+    lastNotifiedMsgRef.current = last.id;
+    const senderName = last.profiles?.username || 'Someone';
+    sendBrowserNotification(senderName, { body: last.body?.slice(0, 120) || 'sent a message', tag: 'room-msg', onClick: () => window.focus() });
+  }, [messages]);
 
   // ── Load existing ratings + premium status on mount ─────────────────────────
   useEffect(() => {
@@ -358,13 +418,40 @@ export default function Battle() {
   // ── Solo: fire AI generation during upcoming phase ─────────────────────
   const soloAiFired = useRef(false);
   const soloAiRetries = useRef(0);
+  const isFreeMode = soloDifficulty === 'free' || room?.challenge?.freeMode === true;
   useEffect(() => {
     if (!isSolo || phase !== 'upcoming' || !room?.id || soloAiFired.current) return;
     if (room?.challenge?.restrictionsList) return;
+    if (!battle?.id) return;
     soloAiFired.current = true;
 
-    const MAX_RETRIES = 3;
     async function tryGenerate() {
+      const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
+
+      if (isFreeMode) {
+        const data = await buildChallenge('trap');
+        const sample = data.sample || data;
+        const payload = buildSamplePayload(sample);
+        payload.instructions = '';
+        payload.restrictionsList = '';
+        await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
+        const durationMs = (battle.duration_minutes || 30) * 60 * 1000;
+        const starts = new Date();
+        const votingEnds = new Date(starts.getTime() + durationMs);
+        await supabase.from('battles').update({
+          title: 'FREE PLAY',
+          prompt_text: '',
+          genre: 'trap',
+          bpm: sample.bpm,
+          restrictions: '',
+          status: 'active',
+          starts_at: starts.toISOString(),
+          voting_ends_at: votingEnds.toISOString(),
+        }).eq('id', room.battle_id);
+        return;
+      }
+
+      const MAX_RETRIES = 3;
       for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
         try {
           const { generateSoloChallenge } = await import('../lib/roomService');
@@ -381,7 +468,6 @@ export default function Battle() {
       }
       // All retries failed — write a basic fallback challenge
       addToast('AI UNAVAILABLE — USING BASIC CHALLENGE');
-      const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
       const data = await buildChallenge('trap');
       const sample = data.sample || data;
       const payload = buildSamplePayload(sample);
@@ -402,7 +488,7 @@ export default function Battle() {
       }).eq('id', room.battle_id);
     }
     tryGenerate();
-  }, [isSolo, phase, room?.id, room?.challenge?.restrictionsList, soloDifficulty]);
+  }, [isSolo, phase, room?.id, room?.challenge?.restrictionsList, soloDifficulty, battle?.id]);
 
   // ── Detect win/loss when battle closes ────────────────────────────────────
   const wasClosed = useRef(false);
@@ -561,7 +647,9 @@ export default function Battle() {
     playUiSound('click');
     setIsStarting(true);
     try {
-      const durationMin = getSoloDurationMinutes(soloDifficulty);
+      const durationMin = soloDifficulty === 'free'
+        ? (battle.duration_minutes || roomSetup?.freeTimer || 30)
+        : getSoloDurationMinutes(soloDifficulty);
       await startSoloSession(battle.id, durationMin);
       await forceStart();
       addToast('SESSION STARTED');
@@ -619,6 +707,9 @@ export default function Battle() {
   async function executeLeave(deleteRoom = false) {
     if (!profile || !room || leavingRoom) return;
     if (phase === 'closed' || battle?.status === 'closed') {
+      await supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id);
+      const { count } = await supabase.from('room_members').select('room_id', { count: 'exact', head: true }).eq('room_id', room.id);
+      await supabase.from('rooms').update({ current_players: count ?? 0 }).eq('id', room.id);
       window.__clearReturnTo?.();
       navigate('/', { replace: true });
       return;
@@ -709,10 +800,17 @@ export default function Battle() {
       <div className="mx-auto w-full max-w-4xl space-y-3">
         {phase === 'upcoming' ? (
           room?.challenge ? (
+            isFreeMode ? (
+              <div className="rdb-panel p-8 text-center">
+                <Spinner label="LOADING SAMPLE" />
+              </div>
+            ) : (
             <div className="space-y-3">
               <SampleCard challenge={room.challenge} phase={phase} room={room} />
               <div className="rdb-panel flex flex-col items-center gap-4 p-6 text-center">
-                <p className="font-mono text-[11px] uppercase text-rdb-muted">READY TO GO?</p>
+                <p className="font-mono text-[11px] uppercase text-rdb-muted">
+                  READY TO GO?
+                </p>
                 <button
                   className="rdb-button rdb-button-primary w-48"
                   type="button"
@@ -731,6 +829,7 @@ export default function Battle() {
                 </button>
               </div>
             </div>
+            )
           ) : (
             <div className="rdb-panel p-8 text-center">
               <Spinner label="GENERATING CHALLENGE" />
@@ -750,11 +849,51 @@ export default function Battle() {
             >
               GO HOME
             </button>
+            <button
+              className="rdb-button border-rdb-red text-rdb-red w-48"
+              type="button"
+              disabled={leavingRoom}
+              onClick={leaveRoom}
+            >
+              {leavingRoom ? 'LEAVING...' : 'LEAVE'}
+            </button>
           </div>
         ) : room?.challenge && phase === 'active' ? (
           <div className="grid gap-3 md:grid-cols-[1fr_320px]">
             {/* ── Left: Sample card ── */}
-            <SampleCard challenge={room.challenge} phase={phase} room={room} hideDetails />
+            <div className="space-y-3">
+              <SampleCard challenge={room.challenge} phase={phase} room={room} hideDetails />
+              {isFreeMode && (
+                <button
+                  className="rdb-button w-full"
+                  type="button"
+                  onClick={async () => {
+                    const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
+                    const data = await buildChallenge('trap');
+                    const sample = data.sample || data;
+                    const payload = buildSamplePayload(sample);
+                    payload.instructions = '';
+                    payload.restrictionsList = '';
+                    await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
+                    if (room.battle_id) {
+                      const durationMin = isSolo
+                        ? (soloDifficulty === 'free' ? (battle.duration_minutes || 30) : getSoloDurationMinutes(soloDifficulty))
+                        : (room.challenge?.battleMinutes || 30);
+                      const now = new Date();
+                      await supabase.from('battles').update({
+                        title: 'FREE PLAY',
+                        genre: 'trap',
+                        bpm: sample.bpm,
+                        starts_at: now.toISOString(),
+                        voting_ends_at: new Date(now.getTime() + durationMin * 60 * 1000).toISOString(),
+                      }).eq('id', room.battle_id);
+                    }
+                  }}
+                >
+                  NEW SAMPLE
+                </button>
+              )}
+            </div>
 
             {/* ── Right: Timer + instructions ── */}
             <div className="flex flex-col gap-3">
@@ -769,7 +908,7 @@ export default function Battle() {
                   {leavingRoom ? 'LEAVING...' : 'LEAVE'}
                 </button>
               </div>
-              <SoloInstructionsCard challenge={room.challenge} />
+              {!isFreeMode && <SoloInstructionsCard challenge={room.challenge} />}
             </div>
           </div>
         ) : phase === 'active' ? (
@@ -781,6 +920,8 @@ export default function Battle() {
           </div>
         ) : phase === 'voting' ? (
           <></>
+        ) : isFreeMode ? (
+          <></>
         ) : (
           <BattlePrompt battle={battle} />
         )}
@@ -788,10 +929,10 @@ export default function Battle() {
     </main>
   ) : phase === 'lobby' && !isSolo ? (
     <main className="rdb-container-admin grid min-h-[calc(100vh-88px)] place-items-center py-12">
-      <div className="mx-auto w-full max-w-xl space-y-5">
+      <div className="mx-auto w-full max-w-4xl space-y-5 lg:grid lg:grid-cols-[1fr_260px] lg:gap-5 lg:space-y-0">
 
-        {/* ── Room header ── */}
-        <div className="text-center">
+        {/* ── Room header (spans both columns) ── */}
+        <div className="text-center lg:col-span-2">
           <h1 className="font-mono text-2xl font-bold uppercase text-rdb-text">
             {room?.name || 'BATTLE LOBBY'}
           </h1>
@@ -800,109 +941,152 @@ export default function Battle() {
           </p>
         </div>
 
-        {/* ── Player list ── */}
-        <div className="rdb-panel p-5">
-          <h2 className="font-mono text-[12px] uppercase text-rdb-orange mb-3">PLAYERS</h2>
-          <div className="space-y-2">
-            {members.map((member) => {
-              const isSelf = member.user_id === profile?.id;
-              return (
-                <div
-                  key={member.user_id}
-                  className="flex items-center justify-between gap-2 rounded border border-rdb-border bg-rdb-bg px-3 py-2.5"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className={`inline-block h-2.5 w-2.5 rounded-full flex-shrink-0 ${member.is_ready ? 'bg-green-400' : 'bg-rdb-orange/40'}`} />
-                    <span className={`truncate font-mono text-[12px] uppercase ${getNameCosmeticClassName(member.profiles)}`} style={getNameGradientStyle(member.profiles)}>
-                      {member.profiles?.nameplate_icon && <span className="mr-1 text-rdb-orange">{getNameplateEmoji(member.profiles.nameplate_icon)}</span>}
-                      {member.profiles?.username || 'USER'}
-                      {isSelf && <span className="ml-1.5 text-rdb-muted text-[10px]">(YOU)</span>}
-                    </span>
+        {/* ── Left column: lobby content ── */}
+        <div className="space-y-5">
+
+          {/* ── Player list ── */}
+          <div className="rdb-panel p-5">
+            <h2 className="font-mono text-[12px] uppercase text-rdb-orange mb-3">PLAYERS</h2>
+            <div className="space-y-2">
+              {members.map((member) => {
+                const isSelf = member.user_id === profile?.id;
+                return (
+                  <div
+                    key={member.user_id}
+                    className="flex items-center justify-between gap-2 rounded border border-rdb-border bg-rdb-bg px-3 py-2.5"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className={`inline-block h-2.5 w-2.5 rounded-full flex-shrink-0 ${member.is_ready ? 'bg-green-400' : 'bg-rdb-orange/40'}`} />
+                      <span className={`truncate font-mono text-[12px] uppercase ${getNameCosmeticClassName(member.profiles)}`} style={getNameGradientStyle(member.profiles)}>
+                        {member.profiles?.nameplate_icon && <span className="mr-1 text-rdb-orange">{getNameplateEmoji(member.profiles.nameplate_icon)}</span>}
+                        {member.profiles?.username || 'USER'}
+                        {isSelf && <span className="ml-1.5 text-rdb-muted text-[10px]">(YOU)</span>}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className={`font-mono text-[10px] uppercase ${member.is_ready ? 'text-green-400' : 'text-rdb-muted'}`}>
+                        {member.is_ready ? 'READY' : 'NOT READY'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`font-mono text-[10px] uppercase ${member.is_ready ? 'text-green-400' : 'text-rdb-muted'}`}>
-                      {member.is_ready ? 'READY' : 'NOT READY'}
-                    </span>
-                  </div>
+                );
+              })}
+              {!members.length && (
+                <div className="rounded border border-rdb-border bg-rdb-bg p-4 text-center font-mono text-[11px] uppercase text-rdb-muted">
+                  Waiting for players...
                 </div>
-              );
-            })}
-            {!members.length && (
-              <div className="rounded border border-rdb-border bg-rdb-bg p-4 text-center font-mono text-[11px] uppercase text-rdb-muted">
-                Waiting for players...
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* ── Lobby countdown reveal ── */}
-        {countdown !== null && (
-          <ChallengeReveal
-            challenge={room?.challenge}
-            endsAt={room?.countdown_started_at ? new Date(new Date(room.countdown_started_at).getTime() + 5000).toISOString() : null}
-            hideChallenge
-          />
-        )}
-
-        {/* ── Loading after countdown ends ── */}
-        {lobbyTransitioning && countdown === null && (
-          <div className="rdb-panel p-6 text-center">
-            <Spinner label="STARTING BATTLE" />
-          </div>
-        )}
-
-        {/* ── Ready / Start controls ── */}
-        {!room?.countdown_started_at && (
-        <div className="rdb-panel p-5 flex flex-col items-center gap-3">
-
-          {isOwner && !room?.countdown_started_at && members.length >= 2 && (
-            <button
-              className="w-full h-11 rdb-button rdb-button-primary font-mono text-[12px] uppercase font-bold"
-              disabled={members.length < 2}
-              onClick={() => {
-                playUiSound('click');
-                startCountdown(room.id).catch((err) => {
-                  addToast(err.message || 'START FAILED', 'error');
-                });
-              }}
-              type="button"
-            >
-              {allReady ? 'START NOW' : 'START ANYWAY'}
-            </button>
+          {/* ── Lobby countdown reveal ── */}
+          {countdown !== null && (
+            <ChallengeReveal
+              challenge={room?.challenge}
+              endsAt={room?.countdown_started_at ? new Date(new Date(room.countdown_started_at).getTime() + 5000).toISOString() : null}
+              hideChallenge
+            />
           )}
 
-          <div className="flex items-center gap-3 w-full">
-            <button
-              className={`flex-1 h-11 font-mono text-[12px] uppercase font-bold ${myMember?.is_ready ? 'rdb-button border-rdb-orange text-rdb-orange' : 'rdb-button rdb-button-primary'}`}
-              onClick={() => { playUiSound('click'); toggleReady(room.id, profile.id).then(() => refresh()); }}
-              type="button"
-            >
-              {myMember?.is_ready ? 'UNREADY' : 'READY UP'}
-            </button>
-            <button
-              className="h-11 px-6 rdb-button border-rdb-red text-rdb-red font-mono text-[12px] uppercase"
-              disabled={leavingRoom}
-              onClick={() => {
-                setLeavingRoom(true);
-                playUiSound('cancel');
-                const isOwnerLeave = room?.owner_id === profile?.id;
-                const payload = { isRanked: room?.mode === 'ranked', battleId: room?.battle_id || '' };
-                dispatchRoomEvent({ roomId: room.id, eventType: isOwnerLeave ? 'owner_leave' : 'player_leave', payload })
-                  .finally(() => { setLeavingRoom(false); });
-                addToast('LEFT LOBBY');
-                navigate('/', { replace: true });
-              }}
-              type="button"
-            >
-              {leavingRoom ? 'LEAVING...' : 'LEAVE'}
-            </button>
-          </div>
+          {/* ── Loading after countdown ends ── */}
+          {lobbyTransitioning && countdown === null && (
+            <div className="rdb-panel p-6 text-center">
+              <Spinner label="STARTING BATTLE" />
+            </div>
+          )}
 
-          <p className="font-mono text-[10px] uppercase text-rdb-muted text-center">
-            {allReady ? 'All players ready' : `${readyCount}/${members.length} READY`}
-          </p>
+          {/* ── Ready / Start controls ── */}
+          {!room?.countdown_started_at && (
+          <div className="rdb-panel p-5 flex flex-col items-center gap-3">
+
+            {isOwner && !room?.countdown_started_at && members.length >= 2 && (
+              <button
+                className="w-full h-11 rdb-button rdb-button-primary font-mono text-[12px] uppercase font-bold"
+                disabled={members.length < 2}
+                onClick={() => {
+                  playUiSound('click');
+                  startCountdown(room.id).catch((err) => {
+                    addToast(err.message || 'START FAILED', 'error');
+                  });
+                }}
+                type="button"
+              >
+                {allReady ? 'START NOW' : 'START ANYWAY'}
+              </button>
+            )}
+
+            <div className="flex items-center gap-3 w-full">
+              <button
+                className={`flex-1 h-11 font-mono text-[12px] uppercase font-bold ${myMember?.is_ready ? 'rdb-button border-rdb-orange text-rdb-orange' : 'rdb-button rdb-button-primary'}`}
+                onClick={() => { playUiSound('click'); toggleReady(room.id, profile.id).then(() => refresh()); }}
+                type="button"
+              >
+                {myMember?.is_ready ? 'UNREADY' : 'READY UP'}
+              </button>
+              <button
+                className="h-11 px-6 rdb-button border-rdb-red text-rdb-red font-mono text-[12px] uppercase"
+                disabled={leavingRoom}
+                onClick={async () => {
+                  setLeavingRoom(true);
+                  playUiSound('cancel');
+                  const isOwnerLeave = room?.owner_id === profile?.id;
+                  const payload = { isRanked: room?.mode === 'ranked', battleId: room?.battle_id || '' };
+                  try {
+                    await dispatchRoomEvent({ roomId: room.id, eventType: isOwnerLeave ? 'owner_leave' : 'player_leave', payload });
+                  } catch (err) {
+                    devError('[Battle] leave dispatch error:', err);
+                  } finally {
+                    setLeavingRoom(false);
+                  }
+                  addToast('LEFT LOBBY');
+                  navigate('/', { replace: true });
+                }}
+                type="button"
+              >
+                {leavingRoom ? 'LEAVING...' : 'LEAVE'}
+              </button>
+            </div>
+
+            <p className="font-mono text-[10px] uppercase text-rdb-muted text-center">
+              {allReady ? 'All players ready' : `${readyCount}/${members.length} READY`}
+            </p>
+          </div>
+          )}
         </div>
-        )}
+
+        {/* ── Right column: room details ── */}
+        <div className="space-y-3">
+          <div className="rdb-panel p-4">
+            <h2 className="font-mono text-[11px] uppercase text-rdb-orange mb-3">ROOM DETAILS</h2>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] uppercase text-rdb-muted">SONG LENGTH</span>
+                <span className="font-mono text-[11px] uppercase text-rdb-text">{room?.song_length_seconds || 60}s</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] uppercase text-rdb-muted">BATTLE TIME</span>
+                <span className="font-mono text-[11px] uppercase text-rdb-text">{room?.challenge?.battleMinutes || battle?.duration_minutes || 30}min</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] uppercase text-rdb-muted">VOTING</span>
+                <span className="font-mono text-[11px] uppercase text-rdb-text">{room?.voting_minutes || 3}min</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] uppercase text-rdb-muted">PLAYERS</span>
+                <span className="font-mono text-[11px] uppercase text-rdb-text">{members.length}/{room?.max_players || 4}</span>
+              </div>
+            </div>
+          </div>
+          <div className="rdb-panel p-4">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase text-rdb-muted">MODE</span>
+              <span className={`border px-1.5 py-0.5 font-mono text-[10px] uppercase ${room?.challenge?.freeMode ? 'border-green-400 text-green-400' : 'border-rdb-orange text-rdb-orange'}`}>
+                {room?.challenge?.freeMode ? 'FREE' : room?.mode === 'ranked' ? 'RANKED' : 'CUSTOM'}
+              </span>
+            </div>
+          </div>
+        </div>
+
       </div>
     </main>
   ) : (
@@ -911,19 +1095,56 @@ export default function Battle() {
         {/* ══ MAIN COLUMN ═══════════════════════════════════════════════════ */}
         <section key={phase} className="space-y-5 phase-fade">
           {phase === 'upcoming' ? (
-            <ChallengeReveal
-              challenge={room?.challenge}
-              endsAt={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : battle?.starts_at}
-              countdownDuration={5}
-              battleId={battle?.id}
-              roomId={room?.id}
-              roomMode={room?.mode}
-            />
+            challengeRevealed ? (
+              <GetReadyCard startsAt={battle?.starts_at} />
+            ) : (
+              <ChallengeReveal
+                challenge={room?.challenge}
+                endsAt={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : battle?.starts_at}
+                countdownDuration={5}
+                battleId={battle?.id}
+                roomId={room?.id}
+                roomMode={room?.mode}
+                onRevealed={() => setChallengeRevealed(true)}
+              />
+            )
           ) : phase === 'closed' ? (
             <></>
           ) : room?.challenge && phase === 'active' ? (
-            <SampleCard challenge={room.challenge} phase={phase} room={room} />
+            <div className="space-y-3">
+              <SampleCard challenge={room.challenge} phase={phase} room={room} />
+              {isFreeMode && (
+                <button
+                  className="rdb-button w-full"
+                  type="button"
+                  onClick={async () => {
+                    const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
+                    const data = await buildChallenge('trap');
+                    const sample = data.sample || data;
+                    const payload = buildSamplePayload(sample);
+                    payload.instructions = '';
+                    payload.restrictionsList = '';
+                    await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
+                    if (room.battle_id) {
+                      const durationMin = room.challenge?.battleMinutes || 30;
+                      const now = new Date();
+                      await supabase.from('battles').update({
+                        title: 'FREE PLAY',
+                        genre: 'trap',
+                        bpm: sample.bpm,
+                        starts_at: now.toISOString(),
+                        voting_ends_at: new Date(now.getTime() + durationMin * 60 * 1000).toISOString(),
+                      }).eq('id', room.battle_id);
+                    }
+                  }}
+                >
+                  NEW SAMPLE
+                </button>
+              )}
+            </div>
           ) : phase === 'voting' ? (
+            <></>
+          ) : isFreeMode ? (
             <></>
           ) : (
             <BattlePrompt battle={battle} />
@@ -1042,7 +1263,17 @@ export default function Battle() {
           )}
 
           {phase === 'closed' && !isSolo && !showGoHome && (
-            <BattleResults submissions={submissions} currentUserId={profile?.id} />
+            <>
+              <BattleResults submissions={submissions} currentUserId={profile?.id} />
+              <button
+                className="rdb-button border-rdb-red text-rdb-red w-full"
+                type="button"
+                disabled={leavingRoom}
+                onClick={leaveRoom}
+              >
+                {leavingRoom ? 'LEAVING...' : 'LEAVE ROOM'}
+              </button>
+            </>
           )}
 
           {phase === 'closed' && !isSolo && showGoHome && (
@@ -1184,7 +1415,7 @@ export default function Battle() {
                   >
                     <a
                       className={`min-w-0 truncate font-mono text-[11px] uppercase hover:underline ${getNameCosmeticClassName(member.profiles)}`}
-                      href={`/profile/${member.profiles?.username}`}
+                      href={`/profile/${member.user_id}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={getNameGradientStyle(member.profiles)}
@@ -1237,7 +1468,7 @@ export default function Battle() {
                 >
                   <a
                     className={`text-rdb-text hover:underline ${getNameCosmeticClassName(message.profiles)}`}
-                    href={`/profile/${message.profiles?.username}`}
+                    href={`/profile/${message.user_id}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={getNameGradientStyle(message.profiles)}

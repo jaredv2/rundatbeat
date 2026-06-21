@@ -24,7 +24,7 @@ function useCountdownFrom(endsAt) {
   return remaining;
 }
 
-export default function ChallengeReveal({ challenge, endsAt, countdownDuration = 5, hideChallenge, battleId, roomId, roomMode, difficulty }) {
+export default function ChallengeReveal({ challenge, endsAt, countdownDuration = 5, hideChallenge, battleId, roomId, roomMode, difficulty, onRevealed }) {
   // Compute our own deadline on mount — ignore parent endsAt if it's in the past or too short
   const effectiveEndsAt = useMemo(() => {
     const now = Date.now();
@@ -94,6 +94,7 @@ export default function ChallengeReveal({ challenge, endsAt, countdownDuration =
     if (revealed && !revealFlash) {
       setRevealFlash(true);
       playUiSound('countdown_reveal');
+      onRevealed?.();
     }
   }, [revealed, revealFlash]);
 

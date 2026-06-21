@@ -39,7 +39,13 @@ export function difficultyFromTier(tier) {
 }
 
 const GENRE_RESTRICTION_GUIDE = {
-  trap: 'hi-hat rolls (triplets, 1/32), snare/clap patterns, open hat placement, melody loops, dark/bright FX.',
+  trap: `TRAP: Tuned 808 sub-bass with slides and bends, layered with punchy kicks. Crisp compressed snares/claps on the 3rd beat. Rattling hi-hats with 1/16, 1/32, triplet rolls and stutter patterns. Atmospheric, eerie, or cinematic melodies (synths, brass, dark piano). Simple loop-based melody every 4-8 bars. Built for vocalists — leave dynamic space in the mix. Tempo 130-170 BPM half-time feel.`,
+  tdf: `TDF: Dreamy, ambient, playful synth loops (video-game-like melodic aesthetic). Distorted/overdriven 808s — sub-bass pushed to extreme, "microwave" levels of distortion. Ambient plugg atmospherics mixed with punchy bounce drum patterns. Playful yet abrasive — airy melodies contrasted with grimy, heavy-hitting low-end. Blend underground plugg textures with modern trap bounce.`,
+  drill: `DRILL: Sliding 808 bass — the defining feature. Bass frequently glides between notes creating eerie, distorted, warbly pitch. Off-kilter hi-hats with triplet rolls and dotted-note burst patterns (not straight continuous notes). Syncopated snares — primary snare on the 3rd beat, counter-snare on the 8th beat. Dark minor-key melodies: reverse piano, eerie ambient pads, orchestral stabs. Cold, suspenseful mood. Tempo 130-145 BPM halftime.`,
+  'jersey club': `JERSEY CLUB: Fast-paced kick drum pattern — alternating straight and triplet kicks creating propulsive "bounce". Signature "bed squeak" sample. Sliced, fragmented vocal chops looped as percussion. Classic drum break samples. Heavy pulsating 808 sub-bass anchoring rapid rhythm. High energy, bouncy feel. Tempo 130-140 BPM.`,
+  hiphop: `HIPHOP: Boom-bap or modern melodic hip-hop drums. Swing or straight grooves. Sample-based or synth melodies. Layered percussion with dynamic arrangement. Creative use of space — not every bar needs to hit hard. Focus on groove, swing, and pocket. Tempo varies widely depending on sub-style.`,
+  rage: `RAGE: Heavy distorted synths and leads — abrasive, aggressive tonality. Hard-hitting 808s with distortion. High-energy, in-your-face drums. Loud, abrasive aesthetic — think Playboi Carti / Yeat style. Minimal melodic complexity — raw energy and texture over melody. Aggressive hi-hat patterns. Dark, gritty atmosphere.`,
+  hoodtrap: `HOODTRAP: Gritty, raw trap production. Heavy 808s with aggressive patterns. Dark, menacing melodies. Hard-hitting drums with bounce. Blend of street energy with trap elements. Atmospheric but aggressive — moody pads with punchy drums. Focus on rhythm and groove over complex melodies.`,
 };
 
 function bpmHints(bpm) {
@@ -59,6 +65,11 @@ function keyHints(key) {
 }
 
 const SOLO_DIFFICULTY = {
+  free: {
+    label: 'free',
+    durationMinutes: 30,
+    instructionStyle: '',
+  },
   easy: {
     label: 'easy',
     durationMinutes: 45,
@@ -135,10 +146,14 @@ LOOP CONTEXT:
   Title: ${loopTitle || 'untitled'}
   Genre: ${genre}
 
+GENRE PROFILE:
+${genreGuide}
+
 RULES:
   1. The instruction MUST start with "Make a ${genre} beat that..." and reference the loop's title or mood.
   2. Do NOT mention BPM, key, or technical music theory. Keep it creative and vibe-based.
-  3. Title MUST end with "TYPE BEAT".
+  3. The instruction MUST reference genre-specific elements from the GENRE PROFILE above (e.g. hi-hat patterns, 808 style, melodic character) to make the challenge authentic to the genre.
+  4. Title MUST end with "TYPE BEAT".
 
 Return ONLY raw valid JSON with keys: instruction (string), title (string), flavor_text (string). No markdown, no backticks.`;
     userMessage = `Ranked challenge using a ${genre} loop titled "${loopTitle}".`;
@@ -151,10 +166,14 @@ LOOP CONTEXT:
   Title: ${loopTitle || 'untitled'}
   Genre: ${genre}
 
+GENRE PROFILE:
+${genreGuide}
+
 RULES:
   1. The instruction MUST start with "Make a ${genre} beat that..." and reference the loop's title or vibe.
   2. Do NOT mention BPM, key, or technical music theory. Keep it creative and vibe-based.
-  3. Title MUST end with "TYPE BEAT".
+  3. The instruction MUST reference genre-specific elements from the GENRE PROFILE above to make the challenge authentic to the genre.
+  4. Title MUST end with "TYPE BEAT".
 
 Return ONLY raw valid JSON with keys: instruction (string), title (string), flavor_text (string). No markdown, no backticks.`;
     userMessage = `Solo ${diff.label} practice session using a ${genre} loop titled "${loopTitle}" at ${loopBpm}bpm in ${loopKey}. Match difficulty to the level description. Reference the loop's mood in the instruction.`;
@@ -172,13 +191,17 @@ LOOP CONTEXT:
   ${bpmHint}
   ${keyHint}
 
+GENRE PROFILE:
+${genreGuide}
+
 PLAYERS: ${playerCount} — difficulty: ${diffLabel}
 Instruction direction: ${diff.instructionStyle}
 
 RULES:
   1. The instruction MUST start with "Make a ${genre} beat that..." and reference the loop's title or mood.
   2. Use BPM and key to make the instruction specific to this loop.
-  3. Title MUST end with "TYPE BEAT".
+  3. The instruction MUST reference genre-specific elements from the GENRE PROFILE above to make the challenge authentic to the genre.
+  4. Title MUST end with "TYPE BEAT".
 
 Return ONLY raw valid JSON with keys: instruction (string), title (string), flavor_text (string). No markdown, no backticks.`;
     userMessage = `Room challenge for ${playerCount} players using a ${genre} loop titled "${loopTitle}" at ${loopBpm}bpm in ${loopKey}. Reference the loop's mood.`;

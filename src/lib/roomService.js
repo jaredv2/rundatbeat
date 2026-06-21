@@ -5,7 +5,7 @@ function log(tag, ...args) {
   devLog(`%c[${new Date().toISOString().slice(11, 23)}] [ROOM] ${tag}`, 'color:#f97316', ...args);
 }
 
-export async function createRoom({ isPublic, hostId, maxPlayers = 4, battleMinutes = 45, songLengthSeconds = 60, votingMinutes = 3, name, allowInstructions = true, allowRestrictions = true }) {
+export async function createRoom({ isPublic, hostId, maxPlayers = 4, battleMinutes = 45, songLengthSeconds = 60, votingMinutes = 3, name, allowInstructions = true, allowRestrictions = true, freeMode = false }) {
   log('CREATE', 'name:', name, 'host:', hostId, 'maxPlayers:', maxPlayers, 'battleMin:', battleMinutes);
   const { data: room, error: roomErr } = await supabase
     .from('rooms')
@@ -21,7 +21,7 @@ export async function createRoom({ isPublic, hostId, maxPlayers = 4, battleMinut
       song_length_seconds: songLengthSeconds,
       voting_minutes: votingMinutes,
       battle_starts_in_seconds: 0,
-      challenge: { allowInstructions, allowRestrictions, battleMinutes },
+      challenge: { allowInstructions, allowRestrictions, battleMinutes, freeMode },
     })
     .select('*')
     .single();
@@ -86,13 +86,14 @@ export async function advanceLobbyToActive(roomId) {
     .select('room_id', { count: 'exact' })
     .eq('room_id', roomId);
 
-  const starts = new Date();
+  const isSolo = room?.mode === 'solo';
+  const revealPrepMs = isSolo ? 0 : 10_000; // 5s challenge reveal + 5s get-ready countdown (multiplayer only)
+  const starts = new Date(Date.now() + revealPrepMs);
   const duration = room?.challenge?.battleMinutes || 15;
   const songLength = room?.song_length_seconds || 60;
-  const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
+  const votingEnds = new Date(starts.getTime() + duration * 60 * 1000 + 15_000);
   log('LOBBY→ACTIVE', 'players:', playerCount, 'duration:', duration + 'min', 'starts:', starts.toISOString());
 
-  const isSolo = room?.mode === 'solo';
   const battleStatus = isSolo ? 'active' : 'upcoming';
 
   try {
@@ -129,6 +130,7 @@ export async function advanceLobbyToActive(roomId) {
           allowInstructions: existingChallenge.allowInstructions !== false,
           allowRestrictions: existingChallenge.allowRestrictions !== false,
           battleMinutes: existingChallenge.battleMinutes || duration,
+          freeMode: existingChallenge.freeMode || false,
         },
         countdown_started_at: null,
         battle_starts_in_seconds: 0,
@@ -180,17 +182,37 @@ export async function generateCustomRoomChallenge(roomId) {
     return existingRoom.challenge;
   }
 
-  const { count: playerCount } = await supabase
-    .from('room_members')
-    .select('room_id', { count: 'exact' })
-    .eq('room_id', roomId);
-
   const { buildChallenge, buildSamplePayload } = await import('./challengeService');
-  const { generateBattlePrompt, flattenRestrictions } = await import('./groq');
 
   const data = await buildChallenge('trap');
   const sample = data.sample || data;
   const challengePayload = buildSamplePayload(sample);
+
+  // Free mode: no AI, just the sample
+  if (existingRoom?.challenge?.freeMode) {
+    challengePayload.instructions = '';
+    challengePayload.restrictionsList = '';
+    await supabase.from('rooms').update({ challenge: challengePayload }).eq('id', roomId);
+
+    const { data: room } = await supabase.from('rooms').select('battle_id').eq('id', roomId).maybeSingle();
+    if (room?.battle_id) {
+      await supabase.from('battles').update({
+        title: 'FREE PLAY',
+        prompt_text: '',
+        genre: challengePayload.genre,
+        bpm: challengePayload.bpm,
+        restrictions: '',
+      }).eq('id', room.battle_id);
+    }
+    return challengePayload;
+  }
+
+  const { generateBattlePrompt, flattenRestrictions } = await import('./groq');
+
+  const { count: playerCount } = await supabase
+    .from('room_members')
+    .select('room_id', { count: 'exact' })
+    .eq('room_id', roomId);
 
   const { json: aiJson } = await generateBattlePrompt({
     genre: challengePayload.genre,

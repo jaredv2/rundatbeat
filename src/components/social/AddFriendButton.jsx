@@ -115,13 +115,7 @@ export default function AddFriendButton({ targetUserId }) {
   }
 
   if (status === 'blocked') return <span className="apple-chip border-rdb-red text-rdb-red">Blocked</span>;
-  if (status === 'accepted') return (
-    <div className="flex gap-1">
-      <span className="apple-chip">Friend</span>
-      <button className="rdb-button text-[10px]" type="button" onClick={unfriend}>Unfriend</button>
-      <button className="rdb-button text-[10px] border-rdb-red text-rdb-red" type="button" onClick={blockUser}>Block</button>
-    </div>
-  );
+  if (status === 'accepted') return null;
   if (status === 'pending' && incoming) return (
     <div className="flex gap-1">
       <button className="rdb-button rdb-button-primary" type="button" onClick={acceptFriend}>Accept</button>

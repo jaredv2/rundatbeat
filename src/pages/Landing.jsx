@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
 
 function connectDiscord() {
-  return supabase?.auth.signInWithOAuth({ provider: 'discord', options: { redirectTo: window.location.origin } });
+  return supabase?.auth.signInWithOAuth({ provider: 'discord', options: { redirectTo: window.location.origin, scopes: 'identify' } });
 }
 
 export default function Landing() {

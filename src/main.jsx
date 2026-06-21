@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import App from './App.jsx';
 import Spinner from './components/ui/Spinner';
+import ErrorBoundary from './components/ui/ErrorBoundary';
 
 const Admin = React.lazy(() => import('./pages/Admin'));
 const Battle = React.lazy(() => import('./pages/Battle'));
@@ -17,6 +18,7 @@ const Profile = React.lazy(() => import('./pages/Profile'));
 const Setup = React.lazy(() => import('./pages/Setup'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Shop = React.lazy(() => import('./pages/Shop'));
+const Credits = React.lazy(() => import('./pages/Credits'));
 
 import GuestRoute from './components/auth/GuestRoute';
 import PrivateRoute from './components/auth/PrivateRoute';
@@ -39,17 +41,20 @@ const router = createBrowserRouter([
       { path: 'shop', element: <PrivateRoute><LazyPage><Shop /></LazyPage></PrivateRoute> },
       { path: 'cosmetics', element: <PrivateRoute><LazyPage><Cosmetics /></LazyPage></PrivateRoute> },
       { path: 'host', element: <PrivateRoute><LazyPage><Host /></LazyPage></PrivateRoute> },
-      { path: 'profile/:username', element: <LazyPage><Profile /></LazyPage> },
+      { path: 'profile/:userId', element: <LazyPage><Profile /></LazyPage> },
       { path: 'settings', element: <PrivateRoute><LazyPage><Settings /></LazyPage></PrivateRoute> },
       { path: 'login', element: <GuestRoute><LazyPage><Login /></LazyPage></GuestRoute> },
       { path: 'setup', element: <PrivateRoute><LazyPage><Setup /></LazyPage></PrivateRoute> },
       { path: 'admin', element: <PrivateRoute><LazyPage><Admin /></LazyPage></PrivateRoute> },
+      { path: 'credits', element: <LazyPage><Credits /></LazyPage> },
     ],
   },
 ]);
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <RouterProvider router={router} />
+    <ErrorBoundary>
+      <RouterProvider router={router} />
+    </ErrorBoundary>
   </React.StrictMode>,
 );

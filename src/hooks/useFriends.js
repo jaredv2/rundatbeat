@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useFriendStore } from '../store/friendStore';
 import { pushNotification } from '../lib/pushNotification';
+import { sendBrowserNotification } from '../lib/notifications';
 
 export function useFriends() {
   const { profile } = useAuthStore();
@@ -67,6 +68,10 @@ export function useFriends() {
             link: '/',
             actorId: payload.new.requester_id,
           });
+          sendBrowserNotification('FRIEND REQUEST', {
+            body: 'Someone sent you a friend request!',
+            tag: 'friend-request',
+          });
         }
       })
       .subscribe();
@@ -80,6 +85,10 @@ export function useFriends() {
             type: 'dm', title: 'NEW MESSAGE', body: p.new.body?.slice(0, 100) || '',
             link: '/',
             actorId: p.new.sender_id,
+          });
+          sendBrowserNotification('NEW MESSAGE', {
+            body: p.new.body?.slice(0, 100) || 'You have a new message!',
+            tag: 'friend-dm',
           });
         }
       })
