@@ -192,6 +192,12 @@ export async function generateCustomRoomChallenge(roomId) {
   if (existingRoom?.challenge?.freeMode) {
     challengePayload.instructions = '';
     challengePayload.restrictionsList = '';
+    challengePayload.freeMode = true;
+    challengePayload.allowInstructions = false;
+    challengePayload.allowRestrictions = false;
+    if (existingRoom.challenge.battleMinutes) {
+      challengePayload.battleMinutes = existingRoom.challenge.battleMinutes;
+    }
     await supabase.from('rooms').update({ challenge: challengePayload }).eq('id', roomId);
 
     const { data: room } = await supabase.from('rooms').select('battle_id').eq('id', roomId).maybeSingle();

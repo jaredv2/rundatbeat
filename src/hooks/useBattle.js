@@ -78,13 +78,16 @@ export function useBattle(id) {
 
   // ── Resolve the actual battle_id from raw id (could be room UUID or battle UUID) ──
   async function resolveIds(rawId) {
-    let b = await supabase.from('battles').select('id').eq('id', rawId).maybeSingle();
+    const [b, r] = await Promise.all([
+      supabase.from('battles').select('id').eq('id', rawId).maybeSingle(),
+      supabase.from('rooms').select('id, battle_id').eq('id', rawId).maybeSingle(),
+    ]);
+
     if (b?.data) {
       devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → battle:${b.data.id.slice(0,8)}`, 'color:#a855f7');
       return { battleId: b.data.id, roomId: null };
     }
 
-    let r = await supabase.from('rooms').select('id, battle_id').eq('id', rawId).maybeSingle();
     if (r?.data) {
       devLog(`%c[${new Date().toISOString().slice(11, 23)}] [BATTLE] RESOLVE id:${rawId.slice(0,8)} → room:${r.data.id.slice(0,8)} battle:${(r.data.battle_id||'none').slice(0,8)}`, 'color:#a855f7');
       return { battleId: r.data.battle_id || null, roomId: r.data.id };
@@ -107,15 +110,27 @@ export function useBattle(id) {
       const actualBattleId = ids.battleId || null;
       battleIdRef.current = actualBattleId;
 
-      // Load room first (always needed)
+      // Load room + battle + submissions in parallel
       let loadedRoom = null;
-      if (ids.roomId) {
-        const { data } = await supabase.from('rooms').select('*').eq('id', ids.roomId).maybeSingle();
-        loadedRoom = data ?? null;
-      } else if (actualBattleId) {
-        const { data } = await supabase.from('rooms').select('*').eq('battle_id', actualBattleId).maybeSingle();
-        loadedRoom = data ?? null;
-      }
+      const roomPromise = (ids.roomId
+        ? supabase.from('rooms').select('*').eq('id', ids.roomId).maybeSingle()
+        : actualBattleId
+          ? supabase.from('rooms').select('*').eq('battle_id', actualBattleId).maybeSingle()
+          : Promise.resolve({ data: null })
+      ).then(({ data }) => data ?? null);
+
+      const battlePromise = actualBattleId
+        ? Promise.all([
+            supabase.from('battles').select('*').eq('id', actualBattleId).maybeSingle(),
+            supabase.from('submissions')
+              .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
+              .eq('battle_id', actualBattleId)
+              .order('rating_total', { ascending: false }),
+          ])
+        : Promise.resolve([null, null]);
+
+      const [roomResult, [battleResult, submissionResult]] = await Promise.all([roomPromise, battlePromise]);
+      loadedRoom = roomResult;
       // Fallback: direct room lookup by raw id
       if (!loadedRoom) {
         const { data } = await supabase.from('rooms').select('*').eq('id', id).maybeSingle();
@@ -125,19 +140,11 @@ export function useBattle(id) {
       setRoom(prev => mergeObj(prev, loadedRoom));
       roomIdRef.current = loadedRoom?.id ?? roomIdRef.current;
 
-      // Load battle + submissions (only if battle exists)
-      if (actualBattleId) {
-        const [{ data: battleData }, { data: submissionData }] = await Promise.all([
-          supabase.from('battles').select('*').eq('id', actualBattleId).maybeSingle(),
-          supabase.from('submissions')
-            .select('*, profiles(username, avatar_url, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon, rank_tier)')
-            .eq('battle_id', actualBattleId)
-            .order('rating_total', { ascending: false }),
-        ]);
-        setBattle(prev => mergeObj(prev, battleData ?? null));
-        setSubmissions(prev => reconcileArray(prev, submissionData ?? []));
+      // Set battle + submissions from parallel load
+      if (battleResult) {
+        setBattle(prev => mergeObj(prev, battleResult.data ?? null));
+        setSubmissions(prev => reconcileArray(prev, submissionResult ?? []));
       } else {
-        // Custom room with no battle yet — clear stale state
         setBattle(null);
         setSubmissions([]);
       }

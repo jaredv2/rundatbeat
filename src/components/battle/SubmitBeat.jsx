@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { playUiSound } from '../../lib/sfx';
 import { uploadBeat } from '../../lib/storage';
-import { AUDIO_LIMITS, validateAudioDuration, validateAudioFile } from '../../lib/validators';
+import { AUDIO_LIMITS, validateAudioFile } from '../../lib/validators';
 import { supabase } from '../../lib/supabase';
 import { addTokenTransaction } from '../../lib/tokenHelpers';
 import { useUiStore } from '../../store/uiStore';
+import { cropAudio, getAudioDuration } from '../../lib/audio';
 import UploadProgress from '../audio/UploadProgress';
 
 export default function SubmitBeat({ battle, profile, existingSubmission, onSubmitted }) {
@@ -66,15 +67,17 @@ export default function SubmitBeat({ battle, profile, existingSubmission, onSubm
       setError(validation);
       return;
     }
-    const durationError = await validateAudioDuration(file, maxSec);
-    if (durationError) {
-      setError(durationError);
-      return;
-    }
     setError('');
     setProgress(20);
     try {
-      const audioUrl = await uploadBeat({ battleId: battle.id, userId: profile.id, file });
+      let uploadFile = file;
+      const duration = await getAudioDuration(file);
+      if (maxSec !== Infinity && duration > maxSec) {
+        addToast('AUDIO TOO LONG — CROPPING TO ' + maxSec + 's');
+        uploadFile = await cropAudio(file, maxSec);
+        setProgress(40);
+      }
+      const audioUrl = await uploadBeat({ battleId: battle.id, userId: profile.id, file: uploadFile });
       setProgress(70);
       const { error: insertError } = await supabase.from('submissions').insert({
         battle_id: battle.id,
