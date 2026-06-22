@@ -87,11 +87,11 @@ export async function advanceLobbyToActive(roomId) {
     .eq('room_id', roomId);
 
   const isSolo = room?.mode === 'solo';
-  const revealPrepMs = isSolo ? 0 : 30_000; // 5s reveal + 5s get-ready + 20s skip vote (multiplayer only)
+  const revealPrepMs = isSolo ? 0 : 15_000; // 5s challenge reveal + 10s get-ready countdown (multiplayer only)
   const starts = new Date(Date.now() + revealPrepMs);
   const duration = room?.challenge?.battleMinutes || 15;
   const songLength = room?.song_length_seconds || 60;
-  const votingEnds = new Date(starts.getTime() + duration * 60 * 1000 + 15_000);
+  const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
   log('LOBBY→ACTIVE', 'players:', playerCount, 'duration:', duration + 'min', 'starts:', starts.toISOString());
 
   const battleStatus = isSolo ? 'active' : 'upcoming';
@@ -130,7 +130,6 @@ export async function advanceLobbyToActive(roomId) {
           allowInstructions: existingChallenge.allowInstructions !== false,
           allowRestrictions: existingChallenge.allowRestrictions !== false,
           battleMinutes: existingChallenge.battleMinutes || duration,
-          freeMode: existingChallenge.freeMode || false,
         },
         countdown_started_at: null,
         battle_starts_in_seconds: 0,
@@ -192,12 +191,6 @@ export async function generateCustomRoomChallenge(roomId) {
   if (existingRoom?.challenge?.freeMode) {
     challengePayload.instructions = '';
     challengePayload.restrictionsList = '';
-    challengePayload.freeMode = true;
-    challengePayload.allowInstructions = false;
-    challengePayload.allowRestrictions = false;
-    if (existingRoom.challenge.battleMinutes) {
-      challengePayload.battleMinutes = existingRoom.challenge.battleMinutes;
-    }
     await supabase.from('rooms').update({ challenge: challengePayload }).eq('id', roomId);
 
     const { data: room } = await supabase.from('rooms').select('battle_id').eq('id', roomId).maybeSingle();

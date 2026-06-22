@@ -1,9 +1,19 @@
 import { ClipboardCopy, ExternalLink, Music } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function SampleCard({ challenge, phase, room, hideDetails }) {
   const [copied, setCopied] = useState(false);
+  const [ytAvailable, setYtAvailable] = useState(true);
   if (!challenge) return null;
+
+  useEffect(() => {
+    if (!challenge.youtube_video_id) return;
+    let cancelled = false;
+    fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${challenge.youtube_video_id}&format=json`)
+      .then((r) => { if (!cancelled) setYtAvailable(r.ok); })
+      .catch(() => { if (!cancelled) setYtAvailable(false); });
+    return () => { cancelled = true; };
+  }, [challenge.youtube_video_id]);
 
   const isVoting = phase === 'voting';
   const allowRestrictions = room?.challenge?.allowRestrictions !== false;
@@ -43,7 +53,7 @@ export default function SampleCard({ challenge, phase, room, hideDetails }) {
         </p>
       )}
 
-      {challenge.youtube_video_id ? (
+      {challenge.youtube_video_id && ytAvailable ? (
         <div className="mt-4">
           <p className="mb-1 font-mono text-[10px] uppercase text-rdb-muted">
             {isVoting ? 'CURRENT SAMPLE' : 'PREVIEW'}
@@ -57,6 +67,11 @@ export default function SampleCard({ challenge, phase, room, hideDetails }) {
               allowFullScreen
             />
           </div>
+        </div>
+      ) : challenge.youtube_video_id && !ytAvailable ? (
+        <div className="mt-4 rounded-lg border border-rdb-red/30 bg-rdb-red/5 p-3">
+          <p className="font-mono text-[10px] uppercase text-rdb-red">SAMPLE UNAVAILABLE</p>
+          <p className="font-mono text-xs text-rdb-muted mt-1">This YouTube video is no longer available.</p>
         </div>
       ) : (challenge.cover_image || challenge.thumb) && (
         <div className="mt-4">

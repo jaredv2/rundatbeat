@@ -2,10 +2,7 @@ import { supabase } from './supabase';
 
 export const RESTRICTION_POOL = [
   "The beat must feel empty — max 3 elements total including the sample",
-  "No hi-hats — kick and snare only",
   "Sample must be pitched down at least 2 semitones from its original pitch",
-  "No snare — only kick and hi-hats",
-  "No more than one drum element playing at any time",
   "No reverb on anything — everything must sound dry and close",
   "The beat must be under 60 seconds — short and punchy",
   "No chord pads or sustained synths — single note leads only",
@@ -18,7 +15,11 @@ export const RESTRICTION_POOL = [
   "The beat must drop to silence for exactly one bar in the middle",
   "Only use percussion from the sample — chop and rearrange the original sounds",
   "The beat must switch up completely halfway through — two distinct sections",
-  "No kicks at all — let the snare and hi-hats drive the rhythm",
+  "The beat must start with a 2 bar build-up before the drums kick in",
+  "Use at least 3 different chopped variations of the sample throughout",
+  "The melody must be played in a different octave in the second half",
+  "Add a breakdown section with just the sample and no drums for at least 4 bars",
+  "The beat must have a call-and-response pattern between the sample and the drums",
 ];
 
 export function pickFromPool() {

@@ -1178,34 +1178,6 @@ export default function Battle() {
           ) : room?.challenge && phase === 'active' ? (
             <div className="space-y-3">
               <SampleCard challenge={room.challenge} phase={phase} room={room} />
-              {isFreeMode && (
-                <button
-                  className="rdb-button w-full"
-                  type="button"
-                  onClick={async () => {
-                    const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
-                    const data = await buildChallenge('trap');
-                    const sample = data.sample || data;
-                    const payload = buildSamplePayload(sample);
-                    payload.instructions = '';
-                    payload.restrictionsList = '';
-                    await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
-                    if (room.battle_id) {
-                      const durationMin = room.challenge?.battleMinutes || 30;
-                      const now = new Date();
-                      await supabase.from('battles').update({
-                        title: 'FREE PLAY',
-                        genre: 'trap',
-                        bpm: sample.bpm,
-                        starts_at: now.toISOString(),
-                        voting_ends_at: new Date(now.getTime() + durationMin * 60 * 1000).toISOString(),
-                      }).eq('id', room.battle_id);
-                    }
-                  }}
-                >
-                  NEW SAMPLE
-                </button>
-              )}
             </div>
           ) : phase === 'voting' ? (
             <></>

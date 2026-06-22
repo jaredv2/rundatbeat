@@ -31,7 +31,7 @@ export function clearBattleLeaving(battleId) {
   }
 }
 
-export function useRoomStateMachine({ battle, room, profile, members, submissions, onStateChange }) {
+export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
   const [phase, setPhase]           = useState(() => derivePhase(battle, room, !!battle));
   const [phaseEndsAt, setPhaseEndsAt] = useState(() => phaseEndTimestamp(derivePhase(battle, room, !!battle), battle, room));
   const [calculatingWinner, setCalculatingWinner] = useState(false);
@@ -44,10 +44,6 @@ export function useRoomStateMachine({ battle, room, profile, members, submission
   const battleWasLoadedRef = useRef(!!battle);
   battleRef.current = battle;
   roomRef.current = room;
-  const membersRef = useRef(members);
-  const submissionsRef = useRef(submissions);
-  membersRef.current = members;
-  submissionsRef.current = submissions;
   if (battle) battleWasLoadedRef.current = true;
 
   const isOwner = Boolean(profile?.id && (room?.owner_id === profile.id || room?.host_id === profile.id));
@@ -126,14 +122,6 @@ export function useRoomStateMachine({ battle, room, profile, members, submission
       }
 
       if (currentPhase === 'active' && b) {
-        if (!isSolo) {
-          const memberCount = membersRef.current?.length || 0;
-          const subCount = submissionsRef.current?.length || 0;
-          if (memberCount > 1 && subCount >= memberCount) {
-            log('TICK', 'all players submitted → advanceToVoting');
-            await advanceToVoting(b.id, r.id, r.voting_minutes);
-          }
-        }
         const votingEndsAt = b.voting_ends_at ? new Date(b.voting_ends_at).getTime() : null;
         if (votingEndsAt && now >= votingEndsAt) {
           if (isSolo) {
@@ -344,17 +332,6 @@ async function advanceToClosed(battleId, roomId) {
   log('→CLOSED', 'battle:', battleId, 'room:', roomId);
 
   try {
-  // Bail if battle is already closed (prevents double-processing)
-  const { data: existingBattle } = await supabase
-    .from('battles')
-    .select('status')
-    .eq('id', battleId)
-    .maybeSingle();
-  if (existingBattle?.status === 'closed') {
-    log('→CLOSED', 'SKIP — battle already closed');
-    return;
-  }
-
   const { count: memberCount } = await supabase
     .from('room_members')
     .select('room_id', { count: 'exact' })
@@ -451,21 +428,15 @@ async function advanceToClosed(battleId, roomId) {
         await supabase.from('battles').update({ winner_id: winnerId, early_closed: true })
           .eq('id', battleId).is('winner_id', null);
 
-        await Promise.all(eloUpdates.map(u => {
-          const prof = (profiles || []).find(p => p.id === u.user_id);
+        for (const u of eloUpdates) {
           const isWinner = u.user_id === winnerId;
-          const isRanked = battle?.mode === 'ranked';
-          return supabase.from('profiles').update({
-            elo: u.newElo,
-            rank_tier: tierFromElo(u.newElo),
-            wins: (prof?.wins || 0) + (isWinner ? 1 : 0),
-            battles_entered: (prof?.battles_entered || 0) + 1,
-            ...(isRanked ? {
-              ranked_wins: (prof?.ranked_wins || 0) + (isWinner ? 1 : 0),
-              ranked_losses: (prof?.ranked_losses || 0) + (!isWinner ? 1 : 0),
-            } : {}),
-          }).eq('id', u.user_id);
-        }));
+          await supabase.rpc('update_ranked_result', {
+            p_user_id: u.user_id,
+            p_new_elo: u.newElo,
+            p_rank_tier: tierFromElo(u.newElo),
+            p_is_winner: isWinner,
+          });
+        }
         log('FORFEIT ELO', 'profiles updated in', (Date.now() - tElo) + 'ms');
 
         pushNotificationToMany(allUserIds.filter(id => id !== winnerId), {
@@ -520,21 +491,15 @@ async function advanceToClosed(battleId, roomId) {
           devLog('[RoomFSM] NORMAL CLOSE ELO:', { battleId, winnerId, eloUpdates });
 
           const tElo = Date.now();
-          await Promise.all(eloUpdates.map(u => {
-            const prof = (profiles || []).find(p => p.id === u.user_id);
+          for (const u of eloUpdates) {
             const isFirst = ranking[u.user_id] === 1;
-            const isRanked = battle?.mode === 'ranked';
-            return supabase.from('profiles').update({
-              elo: u.newElo,
-              rank_tier: tierFromElo(u.newElo),
-              wins: (prof?.wins || 0) + (isFirst ? 1 : 0),
-              battles_entered: (prof?.battles_entered || 0) + 1,
-              ...(isRanked ? {
-                ranked_wins: (prof?.ranked_wins || 0) + (isFirst ? 1 : 0),
-                ranked_losses: (prof?.ranked_losses || 0) + (!isFirst ? 1 : 0),
-              } : {}),
-            }).eq('id', u.user_id);
-          }));
+            await supabase.rpc('update_ranked_result', {
+              p_user_id: u.user_id,
+              p_new_elo: u.newElo,
+              p_rank_tier: tierFromElo(u.newElo),
+              p_is_winner: isFirst,
+            });
+          }
           log('NORMAL ELO', 'profiles updated in', (Date.now() - tElo) + 'ms');
 
           const losers = userIds.filter(id => id !== winnerId);
@@ -561,19 +526,13 @@ async function advanceToClosed(battleId, roomId) {
         .select('user_id')
         .eq('room_id', roomId);
       const userIds = (soloMembers || []).map(m => m.user_id);
-      if (userIds.length) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, wins, battles_entered')
-          .in('id', userIds);
-        for (const p of profiles || []) {
-          await supabase.from('profiles').update({
-            wins: (p.wins || 0) + 1,
-            battles_entered: (p.battles_entered || 0) + 1,
-          }).eq('id', p.id);
-          log('SOLO WIN', p.id.slice(0, 8));
-        }
+      for (const userId of userIds) {
+        await supabase.rpc('record_battle_result', {
+          p_user_id: userId,
+          p_is_winner: true,
+        });
       }
+      log('SOLO WIN', userIds.map(id => id.slice(0, 8)));
     } catch (err) {
       log('SOLO WIN', 'ERROR:', err.message);
     }
@@ -592,16 +551,11 @@ async function advanceToClosed(battleId, roomId) {
         const winnerUserId = roomSubs[0].user_id;
         await supabase.from('battles').update({ winner_id: winnerUserId }).eq('id', battleId).is('winner_id', null);
         const allUserIds = [...new Set(roomSubs.map(s => s.user_id))];
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, wins, battles_entered')
-          .in('id', allUserIds);
-        for (const p of profiles || []) {
-          const isWinner = p.id === winnerUserId;
-          await supabase.from('profiles').update({
-            wins: (p.wins || 0) + (isWinner ? 1 : 0),
-            battles_entered: (p.battles_entered || 0) + 1,
-          }).eq('id', p.id);
+        for (const userId of allUserIds) {
+          await supabase.rpc('record_battle_result', {
+            p_user_id: userId,
+            p_is_winner: userId === winnerUserId,
+          });
         }
         log('ROOM WIN', 'winner:', winnerUserId.slice(0, 8), '| players:', allUserIds.length);
       }
@@ -637,13 +591,25 @@ async function advanceToClosed(battleId, roomId) {
       xpGrants.push({ userId: winnerId, xp: computeXpGain({ rank: 1, isRanked, isRoom }), rank: 1 });
     }
 
+    // Use RPC to grant XP to avoid RLS blocking cross-user updates
     for (const grant of xpGrants) {
-      const { data: prof } = await supabase.from('profiles').select('xp, level').eq('id', grant.userId).maybeSingle();
-      const oldXp = prof?.xp || 0;
-      const newXp = oldXp + grant.xp;
-      const newLevel = levelFromXp(newXp);
-      await supabase.from('profiles').update({ xp: newXp, level: newLevel }).eq('id', grant.userId);
-      log('XP', grant.userId.slice(0, 8), `+${grant.xp} XP`, `rank #${grant.rank}`, `LVL ${newLevel}`);
+      try {
+        const { error } = await supabase.rpc('grant_xp', {
+          p_user_id: grant.userId,
+          p_xp: grant.xp,
+        });
+        if (error) {
+          // Fallback: direct update (works for own profile)
+          const { data: prof } = await supabase.from('profiles').select('xp, level').eq('id', grant.userId).maybeSingle();
+          const oldXp = prof?.xp || 0;
+          const newXp = oldXp + grant.xp;
+          const newLevel = levelFromXp(newXp);
+          await supabase.from('profiles').update({ xp: newXp, level: newLevel }).eq('id', grant.userId);
+        }
+        log('XP', grant.userId.slice(0, 8), `+${grant.xp} XP`, `rank #${grant.rank}`);
+      } catch (grantErr) {
+        log('XP', 'GRANT FAILED for', grant.userId.slice(0, 8), grantErr.message);
+      }
     }
     log('XP', 'all grants done in', (Date.now() - tXp) + 'ms');
   } catch (err) {
