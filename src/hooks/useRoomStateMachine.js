@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { computeNewElos, DEFAULT_ELO, tierFromElo } from '../lib/elo';
-import { computeXpGain, levelFromXp, xpForLevel } from '../lib/xp';
+import { computeXpGain, levelFromXp, xpForLevel, XP_REWARDS } from '../lib/xp';
 import { advanceLobbyToActive } from '../lib/roomService';
 import { pushNotificationToMany } from '../lib/pushNotification';
 import { devLog, devError } from '../lib/devLog';
@@ -570,6 +570,7 @@ async function advanceToClosed(battleId, roomId) {
     const { data: room } = await supabase.from('rooms').select('mode').eq('id', roomId).maybeSingle();
     const isRanked = battle?.mode === 'ranked';
     const isRoom = room?.mode === 'room';
+    const isSoloBattle = battle?.mode === 'solo';
 
     const { data: allSubs } = await supabase
       .from('submissions')
@@ -589,6 +590,17 @@ async function advanceToClosed(battleId, roomId) {
       }
     } else if (winnerId) {
       xpGrants.push({ userId: winnerId, xp: computeXpGain({ rank: 1, isRanked, isRoom }), rank: 1 });
+    }
+
+    // Solo mode: no submissions exist, grant participation XP to all members
+    if (isSoloBattle && xpGrants.length === 0) {
+      const { data: soloMembers } = await supabase
+        .from('room_members')
+        .select('user_id')
+        .eq('room_id', roomId);
+      for (const member of (soloMembers || [])) {
+        xpGrants.push({ userId: member.user_id, xp: XP_REWARDS.PARTICIPATION, rank: 1 });
+      }
     }
 
     // Use RPC to grant XP to avoid RLS blocking cross-user updates

@@ -145,7 +145,7 @@ export default function App() {
             dailyLoginCheckedRef.current = true;
             const granted = shouldCheckDaily ? await grantDailyLogin(profile) : false;
             if (granted) addToast('+3 RDB DAILY LOGIN');
-            if (!profile.discord_id && !profile.discord_banner) {
+            if (!profile.discord_id || !profile.avatar_url) {
               fetchDiscordProfile().then((discord) => {
                 if (discord) {
                   const patch = buildDiscordPatch(session.user.id, discord, profile);

@@ -130,6 +130,7 @@ export async function advanceLobbyToActive(roomId) {
           allowInstructions: existingChallenge.allowInstructions !== false,
           allowRestrictions: existingChallenge.allowRestrictions !== false,
           battleMinutes: existingChallenge.battleMinutes || duration,
+          freeMode: existingChallenge.freeMode || false,
         },
         countdown_started_at: null,
         battle_starts_in_seconds: 0,
@@ -189,8 +190,10 @@ export async function generateCustomRoomChallenge(roomId) {
 
   // Free mode: no AI, just the sample
   if (existingRoom?.challenge?.freeMode) {
+    challengePayload.freeMode = true;
     challengePayload.instructions = '';
     challengePayload.restrictionsList = '';
+    challengePayload.instructionGenre = '';
     await supabase.from('rooms').update({ challenge: challengePayload }).eq('id', roomId);
 
     const { data: room } = await supabase.from('rooms').select('battle_id').eq('id', roomId).maybeSingle();

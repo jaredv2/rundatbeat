@@ -451,8 +451,10 @@ export default function Battle() {
         const data = await buildChallenge('trap');
         const sample = data.sample || data;
         const payload = buildSamplePayload(sample);
+        payload.freeMode = true;
         payload.instructions = '';
         payload.restrictionsList = '';
+        payload.instructionGenre = '';
         await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
         const durationMs = (battle.duration_minutes || 30) * 60 * 1000;
         const starts = new Date();
@@ -547,7 +549,7 @@ export default function Battle() {
           : [];
         const myRank = sorted.findIndex(s => s.user_id === profile.id) + 1;
         const hasSubmitted = subs.some(s => s.user_id === profile.id);
-        const showWin = isWinner || hasSubmitted;
+        const showWin = isWinner || hasSubmitted || isSolo;
 
         if (showWin) {
           devLog('[Battle] XP MODAL', { rank: myRank || 1, hasSubmitted });
@@ -892,8 +894,10 @@ export default function Battle() {
                     const data = await buildChallenge('trap');
                     const sample = data.sample || data;
                     const payload = buildSamplePayload(sample);
+                    payload.freeMode = true;
                     payload.instructions = '';
                     payload.restrictionsList = '';
+                    payload.instructionGenre = '';
                     await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
                     if (room.battle_id) {
                       const durationMin = isSolo
@@ -1143,7 +1147,7 @@ export default function Battle() {
                       const data = await buildChallenge(room?.challenge?.instructionGenre || 'trap');
                       const sample = data.sample || data;
                       const payload = buildSamplePayload(sample);
-                      if (room?.challenge?.freeMode) { payload.instructions = ''; payload.restrictionsList = ''; }
+                      if (room?.challenge?.freeMode) { payload.freeMode = true; payload.instructions = ''; payload.restrictionsList = ''; payload.instructionGenre = ''; }
                       await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
                       if (room.battle_id) {
                         const now = new Date();
