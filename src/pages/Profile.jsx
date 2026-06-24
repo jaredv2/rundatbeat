@@ -5,7 +5,7 @@ import AddFriendButton from '../components/social/AddFriendButton';
 import ReportButton from '../components/social/ReportButton';
 import RankBadge from '../components/ui/RankBadge';
 import TokenBadge from '../components/tokens/TokenBadge';
-import { formatNumber, getNameCosmeticClassName, getNameGradientStyle, getNameplateEmoji, getProfileAccentStyle, getProfileBannerStyle } from '../lib/display';
+import { formatNumber, getNameCosmeticClassName, getNameGradientStyle, getNameplateEmoji, getProfileAccentStyle, getProfileBannerStyle, getAvatarUrl } from '../lib/display';
 import { xpForLevel } from '../lib/xp';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
@@ -88,10 +88,7 @@ export default function Profile() {
           {/* Avatar overlapping banner */}
           <div className="relative px-5">
             <div className="-mt-10 mb-1 flex items-end gap-4">
-              {profile.avatar_url
-                ? <img loading="lazy" className="h-[76px] w-[76px] flex-shrink-0 rounded-xl border-[3px] border-[var(--color-rdb-surface)] object-cover shadow-md" src={profile.avatar_url} alt="" />
-                : <div className="grid h-[76px] w-[76px] flex-shrink-0 place-items-center rounded-xl border-[3px] border-[var(--color-rdb-surface)] bg-rdb-surface text-2xl">🎧</div>
-              }
+              <img loading="lazy" className="h-[76px] w-[76px] flex-shrink-0 rounded-xl border-[3px] border-[var(--color-rdb-surface)] object-cover shadow-md" src={getAvatarUrl(profile)} alt="" />
               <div className="min-w-0 flex-1 pb-0.5">
                 <div className="flex items-center gap-2">
                   <h1 className={`truncate font-mono text-2xl font-bold uppercase leading-none ${getNameCosmeticClassName(profile)}`} style={getNameGradientStyle(profile)}>

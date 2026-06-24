@@ -9,6 +9,7 @@ import { useFriendStore } from '../../store/friendStore';
 import { useUiStore } from '../../store/uiStore';
 import { playUiSound } from '../../lib/sfx';
 import { pushNotification } from '../../lib/pushNotification';
+import { getAvatarUrl } from '../../lib/display';
 
 const ONLINE_WINDOW_MS = 2 * 60 * 1000;
 
@@ -418,7 +419,7 @@ export default function FriendsDock() {
                     {incomingRequests.map((req) => (
                       <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-rdb-border bg-rdb-surface p-2" key={req.friendship_id}>
                         <div className="flex items-center gap-2 min-w-0">
-                          {req.avatar_url ? <img loading="lazy" className="h-6 w-6 rounded object-cover" src={req.avatar_url} alt="" /> : <div className="h-6 w-6 rounded bg-rdb-surface" />}
+                          <img loading="lazy" className="h-6 w-6 rounded object-cover" src={getAvatarUrl(req)} alt="" />
                           <span className="truncate font-mono text-[11px] uppercase text-rdb-text">{req.username}</span>
                         </div>
                         <div className="flex gap-1 shrink-0">
@@ -435,7 +436,7 @@ export default function FriendsDock() {
                     {outgoingRequests.map((req) => (
                       <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-rdb-border bg-rdb-surface p-2" key={req.friendship_id}>
                         <div className="flex items-center gap-2 min-w-0">
-                          {req.avatar_url ? <img loading="lazy" className="h-6 w-6 rounded object-cover" src={req.avatar_url} alt="" /> : <div className="h-6 w-6 rounded bg-rdb-surface" />}
+                          <img loading="lazy" className="h-6 w-6 rounded object-cover" src={getAvatarUrl(req)} alt="" />
                           <span className="truncate font-mono text-[11px] uppercase text-rdb-text">{req.username}</span>
                         </div>
                         <button className="rdb-button text-[10px] shrink-0" type="button" onClick={() => cancelRequest(req.friendship_id)}>CANCEL</button>
@@ -462,7 +463,7 @@ export default function FriendsDock() {
                       onKeyDown={(e) => { if (e.key === 'Enter') selectFriend(friend.id); }}
                     >
                       <div className="relative shrink-0">
-                        {friend.avatar_url ? <img loading="lazy" className="h-8 w-8 rounded-md object-cover" src={friend.avatar_url} alt="" /> : <div className="h-8 w-8 rounded-md bg-rdb-surface" />}
+                        <img loading="lazy" className="h-8 w-8 rounded-md object-cover" src={getAvatarUrl(friend)} alt="" />
                         <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-rdb-bg ${online ? 'bg-green-400' : 'bg-rdb-muted'}`} />
                       </div>
                       <span className="min-w-0 flex-1">

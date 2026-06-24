@@ -5,7 +5,7 @@ import { useUiStore } from '../store/uiStore';
 import { playUiSound } from '../lib/sfx';
 import { supabase } from '../lib/supabase';
 import { devError } from '../lib/devLog';
-import { getNameCosmeticClassName, getNameGradientStyle, getNameplateEmoji } from '../lib/display';
+import { getNameCosmeticClassName, getNameGradientStyle, getNameplateEmoji, getAvatarUrl } from '../lib/display';
 import { enterQueue, leaveLobby, startCountdown, advanceLobbyToActive } from '../lib/lobbyService';
 import ChallengeReveal from '../components/battle/ChallengeReveal';
 import Spinner from '../components/ui/Spinner';
@@ -263,7 +263,7 @@ export default function Lobby() {
                     >
                       {m.profiles?.avatar_url
                         ? <img loading="lazy" src={m.profiles.avatar_url} alt="" className="h-full w-full object-cover" />
-                        : (m.profiles?.username || '?')[0]}
+                        : <img loading="lazy" src={getAvatarUrl(m.profiles)} alt="" className="h-full w-full object-cover" />}
                     </span>
                     <span
                       className={`font-mono text-[12px] uppercase truncate ${getNameCosmeticClassName(m.profiles)}`}

@@ -118,6 +118,12 @@ export function buildDiscordAvatarUrl(userId, avatarHash) {
   return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.${ext}?size=256`;
 }
 
+export function getAvatarUrl(profile) {
+  if (profile?.avatar_url) return profile.avatar_url;
+  const seed = profile?.id || profile?.username || 'default';
+  return `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc&backgroundType=gradientLinear`;
+}
+
 export function getNameGradientStyle(profile) {
   const nameColor = NAME_COLOR_STYLES[profile?.active_name_color];
   return {

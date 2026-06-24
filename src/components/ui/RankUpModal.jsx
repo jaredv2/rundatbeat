@@ -61,8 +61,8 @@ export default function RankUpModal({ open, xpGain, oldXp, newXp, oldLevel, newL
 
   return (
     <div
-      className="fixed top-4 right-4 z-[100] w-56 rounded-lg border border-rdb-border bg-rdb-bg/95 p-3 shadow-lg backdrop-blur-md transition-all duration-300"
-      style={{ animation: 'slide-in-right 300ms cubic-bezier(0.34, 1.56, 0.64, 1) both' }}
+      className="fixed top-4 left-4 z-[100] w-56 rounded-lg border border-rdb-border bg-rdb-bg/95 p-3 shadow-lg backdrop-blur-md transition-all duration-300"
+      style={{ animation: 'slide-in-left 300ms cubic-bezier(0.34, 1.56, 0.64, 1) both' }}
     >
       <p className="font-mono text-[10px] uppercase text-rdb-muted mb-1">XP EARNED</p>
       <p className="font-mono text-xl font-bold text-rdb-orange mb-1">

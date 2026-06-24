@@ -1,9 +1,103 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { ChevronLeft, ChevronRight, Lock, Unlock } from 'lucide-react';
 import WaveformPlayer from '../audio/WaveformPlayer';
 import { useVoting } from '../../hooks/useVoting';
 import { useUiStore } from '../../store/uiStore';
 import { playUiSound } from '../../lib/sfx';
+
+const VoteCtx = createContext(null);
+
+function useVoteCtx() { return useContext(VoteCtx); }
+
+export function VotingFeedDisplay() {
+  const { currentIndex, otherSubmissions, localRatings, current } = useVoteCtx();
+  if (!otherSubmissions.length) {
+    return (
+      <div className="border border-dashed border-rdb-orange p-6 font-mono text-rdb-orange">
+        NO SUBMISSIONS TO VOTE ON
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-mono text-sm uppercase text-rdb-orange">VOTE — PRODUCER #{currentIndex + 1}</h2>
+        <span className="font-mono text-[11px] text-rdb-muted">{currentIndex + 1} / {otherSubmissions.length}</span>
+      </div>
+      <div className="rdb-panel p-4">
+        <div className="mb-3">
+          <h3 className="font-mono text-lg uppercase text-rdb-text">PRODUCER #{currentIndex + 1}</h3>
+          <span className="font-mono text-[10px] uppercase text-rdb-muted">ANONYMOUS SUBMISSION</span>
+        </div>
+        <WaveformPlayer url={current.audio_url} />
+      </div>
+    </div>
+  );
+}
+
+export function VotingFeedControls() {
+  const { currentIndex, setCurrentIndex, otherSubmissions, localRatings, current, voting, votingStopped, togglingLock, handleRate, handleToggleLock } = useVoteCtx();
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex < otherSubmissions.length - 1;
+
+  if (!otherSubmissions.length) return null;
+
+  return (
+    <div className="rdb-panel p-4 space-y-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="font-mono text-[10px] uppercase text-rdb-muted">COLD</span>
+        <span className="font-mono text-sm font-bold text-rdb-orange">{localRatings[current.id] !== undefined ? `${localRatings[current.id]}/10` : '0/10'}</span>
+        <span className="font-mono text-[10px] uppercase text-rdb-muted">HOT</span>
+      </div>
+      <div className="flex gap-1">
+        {Array.from({ length: 11 }, (_, i) => (
+          <button
+            key={i}
+            type="button"
+            className={`flex-1 h-10 rounded text-[11px] font-bold font-mono transition ${
+              localRatings[current.id] === i
+                ? 'bg-rdb-orange text-black'
+                : 'bg-white/5 text-rdb-muted hover:bg-white/10'
+            }`}
+            disabled={voting}
+            onClick={() => handleRate(i)}
+          >
+            {i}
+          </button>
+        ))}
+      </div>
+      <div className="flex justify-between mt-1 px-1">
+        <span className="font-mono text-[9px] text-rdb-muted">0</span>
+        <span className="font-mono text-[9px] text-rdb-muted">5</span>
+        <span className="font-mono text-[9px] text-rdb-muted">10</span>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 pt-2 border-t border-rdb-border">
+        <div className="flex gap-2">
+          <button className="rdb-button" disabled={!hasPrev} type="button" onClick={() => { playUiSound('click'); setCurrentIndex((i) => i - 1); }}>
+            <ChevronLeft size={16} /> PREV
+          </button>
+          <button className="rdb-button" disabled={!hasNext} type="button" onClick={() => { playUiSound('click'); setCurrentIndex((i) => i + 1); }}>
+            NEXT <ChevronRight size={16} />
+          </button>
+        </div>
+        <button
+          className={`rdb-button ${votingStopped ? 'border-green-400 text-green-400' : 'border-rdb-orange text-rdb-orange'}`}
+          type="button"
+          disabled={togglingLock}
+          onClick={handleToggleLock}
+        >
+          {votingStopped ? <><Unlock size={16} /> UNLOCK</> : <><Lock size={16} /> LOCK</>}
+        </button>
+      </div>
+
+      <div className="font-mono text-[10px] uppercase text-rdb-muted text-center">
+        {Object.keys(localRatings).length} / {otherSubmissions.length} RATED
+        {votingStopped && <span className="ml-2 text-green-400">— LOCKED</span>}
+      </div>
+    </div>
+  );
+}
 
 export default function VotingFeed({ battle, room, submissions, profile, votes = {}, ratings = {}, votingStopped = false, onVoted, onStopVoting }) {
   const { castRating, stopVoting } = useVoting();
@@ -15,14 +109,12 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
   const [togglingLock, setTogglingLock] = useState(false);
 
   useEffect(() => {
-    // Only sync from props on initial load or battle change — not after each vote
     if (Object.keys(localRatings).length === 0) setLocalRatings(ratings);
   }, [ratings]);
 
   const myId = profile?.id;
   const otherSubmissions = useMemo(() => {
     const filtered = submissions.filter((s) => s.user_id && myId && s.user_id !== myId);
-    // Deterministic shuffle based on battle id so order is consistent but doesn't leak rank
     const seed = battle?.id ? [...battle.id].reduce((a, c) => a + c.charCodeAt(0), 0) : 0;
     return [...filtered].sort((a, b) => {
       const ha = [...(a.id || '')].reduce((s, c) => s + c.charCodeAt(0), 0) + seed;
@@ -31,16 +123,6 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
     });
   }, [submissions, myId, battle?.id]);
   const current = otherSubmissions[currentIndex];
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < otherSubmissions.length - 1;
-
-  if (!otherSubmissions.length) {
-    return (
-      <div className="border border-dashed border-rdb-orange p-6 font-mono text-rdb-orange">
-        NO SUBMISSIONS TO VOTE ON
-      </div>
-    );
-  }
 
   async function handleRate(rating) {
     if (!current || votingRef.current) return;
@@ -50,14 +132,7 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
     setLocalRatings((prev) => ({ ...prev, [current.id]: rating }));
     setVoting(true);
     try {
-      await castRating({
-        battleId: battle.id,
-        submission: current,
-        voterId: myId,
-        voterProfile: profile,
-        rating,
-        description: '',
-      });
+      await castRating({ battleId: battle.id, submission: current, voterId: myId, voterProfile: profile, rating, description: '' });
       addToast('VOTE CAST');
       onVoted?.();
     } catch (error) {
@@ -85,86 +160,17 @@ export default function VotingFeed({ battle, room, submissions, profile, votes =
     }
   }
 
+  const ctx = {
+    currentIndex, setCurrentIndex, otherSubmissions, localRatings, current,
+    voting, votingStopped, togglingLock, handleRate, handleToggleLock,
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-mono text-sm uppercase text-rdb-orange">VOTE — PRODUCER #{currentIndex + 1}</h2>
-        <span className="font-mono text-[11px] text-rdb-muted">{currentIndex + 1} / {otherSubmissions.length}</span>
+    <VoteCtx.Provider value={ctx}>
+      <div className="space-y-4">
+        <VotingFeedDisplay />
+        <VotingFeedControls />
       </div>
-
-      <div className="rdb-panel p-4">
-        <div className="mb-3">
-          <h3 className="font-mono text-lg uppercase text-rdb-text">PRODUCER #{currentIndex + 1}</h3>
-          <span className="font-mono text-[10px] uppercase text-rdb-muted">ANONYMOUS SUBMISSION</span>
-        </div>
-
-        <WaveformPlayer url={current.audio_url} />
-
-        <div className="mt-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="font-mono text-[10px] uppercase text-rdb-muted">COLD</span>
-            <span className="font-mono text-sm font-bold text-rdb-orange">{localRatings[current.id] !== undefined ? `${localRatings[current.id]}/10` : '0/10'}</span>
-            <span className="font-mono text-[10px] uppercase text-rdb-muted">HOT</span>
-          </div>
-          <div className="flex gap-1">
-            {Array.from({ length: 11 }, (_, i) => (
-              <button
-                key={i}
-                type="button"
-                className={`flex-1 h-10 rounded text-[11px] font-bold font-mono transition ${
-                  localRatings[current.id] === i
-                    ? 'bg-rdb-orange text-black'
-                    : 'bg-white/5 text-rdb-muted hover:bg-white/10'
-                }`}
-                disabled={voting}
-                onClick={() => handleRate(i)}
-              >
-                {i}
-              </button>
-            ))}
-          </div>
-          <div className="flex justify-between mt-1 px-1">
-            <span className="font-mono text-[9px] text-rdb-muted">0</span>
-            <span className="font-mono text-[9px] text-rdb-muted">5</span>
-            <span className="font-mono text-[9px] text-rdb-muted">10</span>
-          </div>
-        </div>
-
-      </div>
-
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex gap-2">
-          <button
-            className="rdb-button"
-            disabled={!hasPrev}
-            type="button"
-            onClick={() => { playUiSound('click'); setCurrentIndex((i) => i - 1); }}
-          >
-            <ChevronLeft size={16} /> PREVIOUS
-          </button>
-          <button
-            className="rdb-button"
-            disabled={!hasNext}
-            type="button"
-            onClick={() => { playUiSound('click'); setCurrentIndex((i) => i + 1); }}
-          >
-            NEXT <ChevronRight size={16} />
-          </button>
-        </div>
-        <button
-          className={`rdb-button ${votingStopped ? 'border-green-400 text-green-400' : 'border-rdb-orange text-rdb-orange'}`}
-          type="button"
-          disabled={togglingLock}
-          onClick={handleToggleLock}
-        >
-          {votingStopped ? <><Unlock size={16} /> UNLOCK</> : <><Lock size={16} /> LOCK VOTING</>}
-        </button>
-      </div>
-
-      <div className="font-mono text-[10px] uppercase text-rdb-muted text-center">
-        {Object.keys(localRatings).length} / {otherSubmissions.length} SUBMISSIONS RATED
-        {votingStopped && <span className="ml-2 text-green-400">— LOCKED</span>}
-      </div>
-    </div>
+    </VoteCtx.Provider>
   );
 }

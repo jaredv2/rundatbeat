@@ -51,18 +51,20 @@ function PhaseTimer({ label, target, urgent: forcedUrgent }) {
   const urgent = forcedUrgent ?? remaining < 5 * 60 * 1000;
   return (
     <div
-      className={`rdb-panel flex items-center justify-between gap-3 p-3 font-mono text-[11px] uppercase ${
+      className={`rdb-panel p-5 text-center font-mono uppercase ${
         urgent ? 'border-red-500 text-red-400' : 'text-rdb-muted'
       }`}
     >
-      <span>{urgent ? `⚠ ${label} CLOSING SOON` : `${label} CLOSES IN`}</span>
-      <span
-        className={`text-base font-bold tracking-widest ${
+      <p className={`text-[11px] mb-2 ${urgent ? 'text-red-400' : 'text-rdb-muted'}`}>
+        {urgent ? `⚠ ${label} — CLOSING SOON` : label}
+      </p>
+      <p
+        className={`text-3xl font-bold tracking-[0.2em] ${
           urgent ? 'text-red-400' : 'text-rdb-orange'
         }`}
       >
         {countdown}
-      </span>
+      </p>
     </div>
   );
 }
@@ -827,9 +829,9 @@ export default function Battle() {
                 <Spinner label="LOADING SAMPLE" />
               </div>
             ) : (
-            <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-[1fr_300px]">
               <SampleCard challenge={room.challenge} phase={phase} room={room} />
-              <div className="rdb-panel flex flex-col items-center gap-4 p-6 text-center">
+              <div className="rdb-panel flex flex-col items-center justify-center gap-4 p-6 text-center aspect-square">
                 <p className="font-mono text-[11px] uppercase text-rdb-muted">
                   READY TO GO?
                 </p>
@@ -1114,157 +1116,142 @@ export default function Battle() {
       </div>
     </main>
   ) : (
-    <main className="rdb-container-admin">
+    <main className="rdb-container-admin space-y-4">
+      {/* ══ TIMER — full width across both columns ═══════════════════════ */}
+      {(phase === 'active' || (phase === 'upcoming' && challengeRevealed && isSolo)) && (
+        <PhaseTimer
+          label="SUBMISSIONS CLOSE IN"
+          target={battle.voting_ends_at || battle.ends_at}
+        />
+      )}
+      {isVotingPhase && (
+        <PhaseTimer
+          label="VOTING ENDS IN"
+          target={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : null}
+        />
+      )}
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-        {/* ══ MAIN COLUMN ═══════════════════════════════════════════════════ */}
-        <section key={phase} className="space-y-5 phase-fade">
-          {phase === 'upcoming' ? (
-            !challengeRevealed ? (
-              <ChallengeReveal
-                challenge={room?.challenge}
-                endsAt={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : battle?.starts_at}
-                countdownDuration={5}
-                battleId={battle?.id}
-                roomId={room?.id}
-                roomMode={room?.mode}
-                onRevealed={() => setChallengeRevealed(true)}
-              />
-            ) : useSkipVote && !skipVoteDone ? (
-              <SkipVoteCard
-                roomId={room?.id}
-                members={members}
-                profile={profile}
-                challenge={room?.challenge}
-                endsAt={battle?.starts_at ? new Date(new Date(battle.starts_at).getTime() - 5000).toISOString() : null}
-                onResult={async (skip) => {
-                  if (skip) {
-                    playUiSound('phase_change');
-                    addToast('SAMPLE SKIPPED — GENERATING NEW ONE');
-                    setSkipVoteDone(false);
-                    await supabase.from('room_members').update({ skip_vote: null }).eq('room_id', room.id);
-                    try {
-                      const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
-                      const data = await buildChallenge(room?.challenge?.instructionGenre || 'trap');
-                      const sample = data.sample || data;
-                      const payload = buildSamplePayload(sample);
-                      if (room?.challenge?.freeMode) { payload.freeMode = true; payload.instructions = ''; payload.restrictionsList = ''; payload.instructionGenre = ''; }
-                      await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
-                      if (room.battle_id) {
-                        const now = new Date();
-                        const currentStartsAt = battle?.starts_at ? new Date(battle.starts_at).getTime() : now.getTime();
-                        const newStartsAt = Math.max(currentStartsAt, now.getTime()) + 25_000;
-                        await supabase.from('battles').update({
-                          starts_at: new Date(newStartsAt).toISOString(),
-                          voting_ends_at: new Date(newStartsAt + (room.challenge?.battleMinutes || 30) * 60_000).toISOString(),
-                          bpm: sample.bpm,
-                        }).eq('id', room.battle_id);
+        {/* ══ LEFT COLUMN ═══════════════════════════════════════════════════ */}
+        <div className="space-y-4 phase-fade">
+
+          {/* ── MIDDLE: main content ── */}
+          <div className="space-y-4">
+            {phase === 'upcoming' ? (
+              !challengeRevealed ? (
+                <ChallengeReveal
+                  challenge={room?.challenge}
+                  endsAt={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : battle?.starts_at}
+                  countdownDuration={30}
+                  battleId={battle?.id}
+                  roomId={room?.id}
+                  roomMode={room?.mode}
+                  onRevealed={() => setChallengeRevealed(true)}
+                />
+              ) : useSkipVote && !skipVoteDone ? (
+                <SkipVoteCard
+                  roomId={room?.id}
+                  members={members}
+                  profile={profile}
+                  challenge={room?.challenge}
+                  endsAt={battle?.starts_at ? new Date(new Date(battle.starts_at).getTime() - 5000).toISOString() : null}
+                  onResult={async (skip) => {
+                    if (skip) {
+                      playUiSound('phase_change');
+                      addToast('SAMPLE SKIPPED — GENERATING NEW ONE');
+                      setSkipVoteDone(false);
+                      await supabase.from('room_members').update({ skip_vote: null }).eq('room_id', room.id);
+                      try {
+                        const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
+                        const data = await buildChallenge(room?.challenge?.instructionGenre || 'trap');
+                        const sample = data.sample || data;
+                        const payload = buildSamplePayload(sample);
+                        if (room?.challenge?.freeMode) { payload.freeMode = true; payload.instructions = ''; payload.restrictionsList = ''; payload.instructionGenre = ''; }
+                        await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
+                        if (room.battle_id) {
+                          const now = new Date();
+                          const currentStartsAt = battle?.starts_at ? new Date(battle.starts_at).getTime() : now.getTime();
+                          const newStartsAt = Math.max(currentStartsAt, now.getTime()) + 25_000;
+                          await supabase.from('battles').update({
+                            starts_at: new Date(newStartsAt).toISOString(),
+                            voting_ends_at: new Date(newStartsAt + (room.challenge?.battleMinutes || 30) * 60_000).toISOString(),
+                            bpm: sample.bpm,
+                          }).eq('id', room.battle_id);
+                        }
+                      } catch (err) {
+                        devError('[SkipVote] regenerate failed:', err);
+                        addToast('REGENERATION FAILED', 'error');
                       }
-                    } catch (err) {
-                      devError('[SkipVote] regenerate failed:', err);
-                      addToast('REGENERATION FAILED', 'error');
+                    } else {
+                      playUiSound('success');
+                      addToast('SAMPLE KEPT — LET\'S GO');
+                      setSkipVoteDone(true);
                     }
-                  } else {
-                    playUiSound('success');
-                    addToast('SAMPLE KEPT — LET\'S GO');
-                    setSkipVoteDone(true);
-                  }
-                }}
-              />
-            ) : !getReadyDone ? (
-              <GetReadyCard onDone={() => setGetReadyDone(true)} />
-            ) : (
-              <div className="rdb-panel p-8 text-center space-y-4">
-                <Spinner label="STARTING BATTLE" />
-              </div>
-            )
-          ) : phase === 'closed' ? (
-            <></>
-          ) : room?.challenge && phase === 'active' ? (
-            <div className="space-y-3">
+                  }}
+                />
+              ) : !getReadyDone ? (
+                <GetReadyCard onDone={() => setGetReadyDone(true)} />
+              ) : (
+                <div className="rdb-panel p-8 text-center space-y-4">
+                  <Spinner label="STARTING BATTLE" />
+                </div>
+              )
+            ) : phase === 'active' && room?.challenge ? (
               <SampleCard challenge={room.challenge} phase={phase} room={room} />
-            </div>
-          ) : phase === 'voting' ? (
-            <></>
-          ) : isFreeMode ? (
-            <></>
-          ) : (
-            <BattlePrompt battle={battle} />
-          )}
+            ) : isVotingPhase && !calculatingWinner ? (
+              <div id="voting-feed">
+                <VotingFeed
+                  battle={battle}
+                  room={room}
+                  submissions={submissions}
+                  profile={profile}
+                  ratings={ratings}
+                  votingStopped={Boolean(myMember?.voting_stopped)}
+                  onVoted={async () => { await reloadRatings(); }}
+                  onStopVoting={() => {}}
+                />
+              </div>
+            ) : calculatingWinner ? (
+              <div className="rdb-panel p-12 text-center">
+                <Spinner label="CALCULATING VOTES" />
+                <p className="mt-4 font-mono text-sm uppercase text-rdb-muted">DETERMINING WINNER...</p>
+              </div>
+            ) : phase === 'closed' && !isSolo && !showGoHome ? (
+              <BattleResults submissions={submissions} currentUserId={profile?.id} />
+            ) : phase === 'closed' && !isSolo && showGoHome ? (
+              <div className="rdb-panel p-8 text-center space-y-4">
+                <p className="font-mono text-sm uppercase text-rdb-muted">This battle has ended.</p>
+                <p className="font-mono text-[11px] uppercase text-rdb-muted">Time to go home.</p>
+                <button
+                  className="rdb-button rdb-button-primary"
+                  type="button"
+                  onClick={async () => {
+                    if (profile?.id && room?.id) {
+                      await supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id);
+                      const { count } = await supabase.from('room_members').select('room_id', { count: 'exact', head: true }).eq('room_id', room.id);
+                      await supabase.from('rooms').update({ current_players: count ?? 0 }).eq('id', room.id);
+                    }
+                    navigate('/');
+                  }}
+                >
+                  GO HOME
+                </button>
+              </div>
+            ) : isFreeMode ? (
+              <></>
+            ) : (
+              <BattlePrompt battle={battle} />
+            )}
 
-          {/* ── Status bar (hidden when closed) ── */}
-          {phase !== 'closed' && (
-          <div className="rdb-panel flex flex-wrap items-center justify-between gap-3 p-4 font-mono text-[11px] uppercase">
-            <span className="text-rdb-muted">
-              STATUS: <span className="text-rdb-orange">{statusLabel}</span>
-              {isSolo && (
-                <span className="ml-2 border border-rdb-orange px-1.5 py-0.5 text-rdb-orange">
-                  SOLO
-                </span>
-              )}
-              
-            </span>
-            <div className="flex items-center gap-4">
-              <SongLengthBadge seconds={songSeconds} />
-              <span className="text-rdb-muted">
-                {formatNumber(visibleSubmissions.length)} SUBMITTED
-              </span>
-            </div>
           </div>
-          )}
 
-          {/* ── Phase countdown timers ── */}
-          {phase === 'upcoming' && isSolo && (
-            <PhaseTimer
-              label="SESSION STARTS"
-              target={battle.starts_at}
-            />
-          )}
-          {phase === 'active' && (
-            <PhaseTimer
-              label="SUBMISSIONS"
-              target={battle.voting_ends_at || battle.ends_at}
-            />
-          )}
-          {phase === 'voting' && (
-            <PhaseTimer
-              label="VOTING"
-              target={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : null}
-            />
-          )}
-
-          {/* ── Forfeit button for ranked matches ── */}
-          {room?.mode === 'ranked' && !isSolo && phase !== 'closed' && phase !== 'lobby' && (
-            <div className="rdb-panel p-3 flex items-center justify-between gap-3">
-              <span className="font-mono text-[11px] uppercase text-rdb-muted">
-                LEAVE THE MATCH
-              </span>
-              <button
-                className="rdb-button border-rdb-red text-rdb-red"
-                type="button"
-                disabled={leavingRoom}
-                onClick={leaveRoom}
-              >
-                {leavingRoom ? 'FORFEITING...' : 'FORFEIT'}
-              </button>
-            </div>
-          )}
-
-          {/* ── Submit area (disabled in solo practice mode) ── */}
+          {/* ── BOTTOM: upload card or vote controls ── */}
           {canSubmit && !isSolo && (
             <div id="submit-beat">
               {premiumLocked ? (
-                <PremiumGate
-                  battle={battle}
-                  profile={profile}
-                  onPaid={() => setPaid(true)}
-                />
+                <PremiumGate battle={battle} profile={profile} onPaid={() => setPaid(true)} />
               ) : (
-                <SubmitBeat
-                  battle={battle}
-                  profile={profile}
-                  existingSubmission={mine}
-                  onSubmitted={refresh}
-                />
+                <SubmitBeat battle={battle} profile={profile} existingSubmission={mine} onSubmitted={refresh} />
               )}
             </div>
           )}
@@ -1274,74 +1261,24 @@ export default function Battle() {
               <p className="mt-2">No submissions in practice mode. Use the chat to test features.</p>
             </div>
           )}
-
-          {/* ── Voting feed — gated to voting phase, hidden while calculating ── */}
-          {isVotingPhase && !calculatingWinner && (
-            <div id="voting-feed">
-              <VotingFeed
-                battle={battle}
-                room={room}
-                submissions={submissions}
-                profile={profile}
-                ratings={ratings}
-                votingStopped={Boolean(myMember?.voting_stopped)}
-                onVoted={async () => {
-                  await reloadRatings();
-                }}
-                onStopVoting={() => {}}
-              />
+          {room?.mode === 'ranked' && !isSolo && phase !== 'closed' && phase !== 'lobby' && (
+            <div className="rdb-panel p-3 flex items-center justify-between gap-3">
+              <span className="font-mono text-[11px] uppercase text-rdb-muted">LEAVE THE MATCH</span>
+              <button className="rdb-button border-rdb-red text-rdb-red" type="button" disabled={leavingRoom} onClick={leaveRoom}>
+                {leavingRoom ? 'FORFEITING...' : 'FORFEIT'}
+              </button>
             </div>
           )}
-
-          {/* ── Calculating winner loading overlay ── */}
-          {calculatingWinner && (
-            <div className="rdb-panel p-8 text-center">
-              <Spinner label="CALCULATING VOTES" />
-              <p className="mt-3 font-mono text-[10px] uppercase text-rdb-muted">
-                DETERMINING WINNER...
-              </p>
-            </div>
-          )}
-
           {phase === 'closed' && !isSolo && !showGoHome && (
-            <>
-              <BattleResults submissions={submissions} currentUserId={profile?.id} />
-              <button
-                className="rdb-button border-rdb-red text-rdb-red w-full"
-                type="button"
-                disabled={leavingRoom}
-                onClick={leaveRoom}
-              >
-                {leavingRoom ? 'LEAVING...' : 'LEAVE ROOM'}
-              </button>
-            </>
+            <button className="rdb-button border-rdb-red text-rdb-red w-full" type="button" disabled={leavingRoom} onClick={leaveRoom}>
+              {leavingRoom ? 'LEAVING...' : 'LEAVE ROOM'}
+            </button>
           )}
 
-          {phase === 'closed' && !isSolo && showGoHome && (
-            <div className="rdb-panel p-8 text-center space-y-4">
-              <p className="font-mono text-sm uppercase text-rdb-muted">This battle has ended.</p>
-              <p className="font-mono text-[11px] uppercase text-rdb-muted">Time to go home.</p>
-              <button
-                className="rdb-button rdb-button-primary"
-                type="button"
-                onClick={async () => {
-                  if (profile?.id && room?.id) {
-                    await supabase.from('room_members').delete().eq('room_id', room.id).eq('user_id', profile.id);
-                    const { count } = await supabase.from('room_members').select('room_id', { count: 'exact', head: true }).eq('room_id', room.id);
-                    await supabase.from('rooms').update({ current_players: count ?? 0 }).eq('id', room.id);
-                  }
-                  navigate('/');
-                }}
-              >
-                GO HOME
-              </button>
-            </div>
-          )}
-
-        </section>
+        </div>
 
         {/* ══ SIDEBAR ═══════════════════════════════════════════════════════ */}
-        <aside className="space-y-4 lg:sticky lg:top-16 lg:self-start">
+        <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
 
           {/* ── Room panel ── */}
           <section className="rdb-panel p-4">
@@ -1408,40 +1345,6 @@ export default function Battle() {
               >
                 {leavingRoom ? 'CLOSING...' : 'CLOSE ROOM'}
               </button>
-            )}
-
-            {/* ── VOTE BUTTON — visible only in voting phase ── */}
-            {isVotingPhase && isMember && (
-              <div className="mt-3">
-                {/* Non-submitters get the primary CTA */}
-                {!mine ? (
-                  <a
-                    className="rdb-button rdb-button-primary w-full block text-center"
-                    href="#voting-feed"
-                  >
-                    <VotePulse />
-                    VOTE NOW
-                  </a>
-                ) : (
-                  /* Submitters see a softer reminder since they have a submission */
-                  <a
-                    className="rdb-button w-full block text-center border-rdb-orange text-rdb-orange"
-                    href="#voting-feed"
-                  >
-                    <VotePulse />
-                    CAST YOUR VOTES
-                  </a>
-                )}
-                {/* Countdown mini-bar inside the voting CTA card */}
-                {phaseEndsAt && (
-                  <div className="mt-2 font-mono text-[10px] uppercase text-rdb-muted text-center">
-                    <PhaseTimer
-                      label="VOTING"
-                      target={new Date(phaseEndsAt).toISOString()}
-                    />
-                  </div>
-                )}
-              </div>
             )}
 
             {/* ── Members list (hidden when room is closed — cleanup removes members) ── */}

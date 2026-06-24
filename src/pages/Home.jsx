@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import MatchmakingModal from '../components/matchmaking/MatchmakingModal';
 import QueueCard from '../components/matchmaking/QueueCard';
@@ -11,6 +11,8 @@ import { devLog } from '../lib/devLog';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
 
+const LONG_PRESS_MS = 1200;
+
 export default function Home() {
   const { profile } = useAuthStore();
   const addToast = useUiStore((s) => s.addToast);
@@ -20,7 +22,55 @@ export default function Home() {
   const [currentRoom, setCurrentRoom] = useState(null);
   const [busy, setBusy] = useState(false);
   const [queueLobby, setQueueLobby] = useState(null);
+  const [holdProgress, setHoldProgress] = useState(0);
+  const [leaving, setLeaving] = useState(false);
   const queueChannelRef = useRef(null);
+  const holdTimerRef = useRef(null);
+  const holdStartRef = useRef(null);
+  const holdRafRef = useRef(null);
+  const wasHoldingRef = useRef(false);
+
+  const clearHold = useCallback(() => {
+    clearTimeout(holdTimerRef.current);
+    cancelAnimationFrame(holdRafRef.current);
+    holdTimerRef.current = null;
+    holdStartRef.current = null;
+    setHoldProgress(0);
+    setLeaving(false);
+  }, []);
+
+  const updateProgress = useCallback(() => {
+    if (!holdStartRef.current) return;
+    const elapsed = Date.now() - holdStartRef.current;
+    const pct = Math.min(1, elapsed / LONG_PRESS_MS);
+    setHoldProgress(pct);
+    if (pct < 1) {
+      holdRafRef.current = requestAnimationFrame(updateProgress);
+    }
+  }, []);
+
+  const onHoldStart = useCallback(() => {
+    if (!currentRoom || busy) return;
+    playUiSound('click');
+    wasHoldingRef.current = true;
+    holdStartRef.current = Date.now();
+    setLeaving(true);
+    holdRafRef.current = requestAnimationFrame(updateProgress);
+    holdTimerRef.current = setTimeout(() => {
+      clearHold();
+      leaveCurrentRoom();
+    }, LONG_PRESS_MS);
+  }, [currentRoom, busy, updateProgress, clearHold]);
+
+  const onHoldEnd = useCallback(() => {
+    if (holdTimerRef.current) {
+      clearHold();
+    }
+  }, [clearHold]);
+
+  useEffect(() => {
+    return () => { clearHold(); };
+  }, [clearHold]);
 
   useEffect(() => {
     if (!profile?.id) return;
@@ -342,20 +392,43 @@ export default function Home() {
         </h1>
         <div className="home-actions">
           <button
-            className="rdb-menu-button border-rdb-orange text-rdb-text"
+            className={`rdb-menu-button border-rdb-orange text-rdb-text ${leaving ? 'ring-2 ring-rdb-red' : ''}`}
             disabled={Boolean(queueLobby)}
             type="button"
             onClick={() => {
-              playUiSound('click');
-              if (currentRoom) {
+              if (wasHoldingRef.current) {
+                wasHoldingRef.current = false;
+                return;
+              }
+              if (currentRoom && !leaving) {
+                playUiSound('click');
                 navigate(`/battle/${currentRoom.battle_id || currentRoom.id}`);
-              } else {
+              } else if (!currentRoom) {
+                playUiSound('click');
                 setPlayOpen(true);
               }
             }}
+            onMouseDown={currentRoom ? onHoldStart : undefined}
+            onMouseUp={currentRoom ? onHoldEnd : undefined}
+            onMouseLeave={currentRoom ? onHoldEnd : undefined}
+            onTouchStart={currentRoom ? onHoldStart : undefined}
+            onTouchEnd={currentRoom ? onHoldEnd : undefined}
+            onTouchCancel={currentRoom ? onHoldEnd : undefined}
           >
-            <span>{queueLobby ? 'QUEUED' : currentRoom ? 'IN BATTLE' : 'PLAY'}</span>
-            <small>{queueLobby ? 'IN QUEUE — LEAVE FIRST' : currentRoom ? 'ACTIVE MATCH — TAP TO REJOIN' : 'SOLO + RANKED + ROOMS'}</small>
+            {currentRoom && leaving && (
+              <span className="absolute inset-0 rounded-lg overflow-hidden pointer-events-none">
+                <span
+                  className="absolute bottom-0 left-0 h-full bg-rdb-red/30 transition-none"
+                  style={{ width: `${holdProgress * 100}%` }}
+                />
+              </span>
+            )}
+            <span className="relative z-10">
+              {queueLobby ? 'QUEUED' : currentRoom ? (leaving ? 'HOLD TO LEAVE...' : 'IN BATTLE') : 'PLAY'}
+            </span>
+            <small className="relative z-10">
+              {queueLobby ? 'IN QUEUE — LEAVE FIRST' : currentRoom ? (leaving ? 'KEEP HOLDING — RELEASE TO REJOIN' : 'TAP TO REJOIN — HOLD TO LEAVE') : 'SOLO + RANKED + ROOMS'}
+            </small>
           </button>
           <Link className="rdb-menu-button" to="/shop">
             <span>SHOP</span>
@@ -367,36 +440,6 @@ export default function Home() {
           </Link>
         </div>
       </section>
-
-
-
-      <div className="fixed bottom-4 right-4 z-40 font-mono text-[11px] uppercase text-rdb-muted">
-        Active players: <b className="text-rdb-orange">{formatNumber(activePlayers)}</b>
-      </div>
-
-      {currentRoom && (
-        <button
-          className="fixed bottom-4 left-4 z-50 rdb-button border-rdb-red text-rdb-red font-mono text-xs"
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            if (!profile?.id) return;
-            setBusy(true);
-            try {
-              await supabase.from('room_members').delete().eq('room_id', currentRoom.id).eq('user_id', profile.id);
-              addToast('FORCE LEFT ROOM');
-              setCurrentRoom(null);
-              await loadHomeStats();
-            } catch {
-              addToast('FORCE LEAVE FAILED', 'error');
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          FORCE LEAVE
-        </button>
-      )}
 
       <MatchmakingModal open={playOpen} onClose={() => setPlayOpen(false)} onQueue={handleQueueEnter} />
     </main>

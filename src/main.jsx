@@ -19,6 +19,7 @@ const Setup = React.lazy(() => import('./pages/Setup'));
 const Settings = React.lazy(() => import('./pages/Settings'));
 const Shop = React.lazy(() => import('./pages/Shop'));
 const Credits = React.lazy(() => import('./pages/Credits'));
+const AuthCallback = React.lazy(() => import('./pages/AuthCallback'));
 
 import GuestRoute from './components/auth/GuestRoute';
 import PrivateRoute from './components/auth/PrivateRoute';
@@ -47,6 +48,7 @@ const router = createBrowserRouter([
       { path: 'setup', element: <PrivateRoute><LazyPage><Setup /></LazyPage></PrivateRoute> },
       { path: 'admin', element: <PrivateRoute><LazyPage><Admin /></LazyPage></PrivateRoute> },
       { path: 'credits', element: <LazyPage><Credits /></LazyPage> },
+      { path: 'auth/callback', element: <LazyPage><AuthCallback /></LazyPage> },
     ],
   },
 ]);

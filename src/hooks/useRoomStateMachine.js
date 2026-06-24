@@ -131,6 +131,27 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
             log('TICK', 'active expired (voting_ends_at reached) → advanceToVoting');
             await advanceToVoting(b.id, r.id, r.voting_minutes);
           }
+        } else if (!isSolo) {
+          // Auto-advance to voting when all members have submitted
+          try {
+            const { data: members } = await supabase
+              .from('room_members')
+              .select('user_id')
+              .eq('room_id', r.id);
+            const { data: subs } = await supabase
+              .from('submissions')
+              .select('user_id')
+              .eq('battle_id', b.id);
+            const memberIds = new Set((members || []).map(m => m.user_id));
+            const subIds = new Set((subs || []).map(s => s.user_id));
+            const allSubmitted = memberIds.size > 1 && [...memberIds].every(id => subIds.has(id));
+            if (allSubmitted) {
+              log('TICK', 'all players submitted → advanceToVoting');
+              await advanceToVoting(b.id, r.id, r.voting_minutes);
+            }
+          } catch (err) {
+            log('TICK', 'all-submitted check error:', err.message);
+          }
         }
       }
 
@@ -191,12 +212,7 @@ export function useRoomStateMachine({ battle, room, profile, onStateChange }) {
         (payload) => {
           const b = battleRef.current;
           const rs = payload.new?.status;
-          let nextPhase;
-          if (rs === 'closed') nextPhase = 'closed';
-          else if (rs === 'voting') nextPhase = 'voting';
-          else if (rs === 'lobby') nextPhase = 'lobby';
-          else if (rs === 'matchmaking') nextPhase = 'matchmaking';
-          else nextPhase = derivePhase(b, payload.new, battleWasLoadedRef.current);
+          const nextPhase = derivePhase(b, payload.new, battleWasLoadedRef.current);
           log('RT:ROOM', 'status:', rs, '→ phase:', nextPhase);
           setPhase(nextPhase);
           setPhaseEndsAt(phaseEndTimestamp(nextPhase, b, payload.new));

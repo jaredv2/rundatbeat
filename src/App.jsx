@@ -146,14 +146,17 @@ export default function App() {
             const granted = shouldCheckDaily ? await grantDailyLogin(profile) : false;
             if (granted) addToast('+3 RDB DAILY LOGIN');
             if (!profile.discord_id || !profile.avatar_url) {
-              fetchDiscordProfile().then((discord) => {
-                if (discord) {
-                  const patch = buildDiscordPatch(session.user.id, discord, profile);
-                  if (patch && Object.keys(patch).length) {
-                    supabase.from('profiles').update(patch).eq('id', profile.id);
+              const isDiscordUser = session?.user?.app_metadata?.provider === 'discord' || session?.user?.app_metadata?.providers?.includes('discord');
+              if (isDiscordUser) {
+                fetchDiscordProfile().then((discord) => {
+                  if (discord) {
+                    const patch = buildDiscordPatch(session.user.id, discord, profile);
+                    if (patch && Object.keys(patch).length) {
+                      supabase.from('profiles').update(patch).eq('id', profile.id);
+                    }
                   }
-                }
-              }).catch(() => {});
+                }).catch(() => {});
+              }
             }
             requestNotificationPermission().catch(() => {});
           } else if (location.pathname !== '/setup') {
@@ -238,7 +241,7 @@ export default function App() {
         <Outlet />
       </div>
 
-      {user && <FriendsDock />}
+      {user && !hideNav && <FriendsDock />}
       {!hideNav && <Footer />}
       <ToastNotification />
     </div>

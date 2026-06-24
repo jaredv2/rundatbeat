@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { fetchDiscordProfile, buildDiscordPatch } from '../lib/discord';
 import { useAuthStore } from '../store/authStore';
 import { useUiStore } from '../store/uiStore';
+import { getAvatarUrl } from '../lib/display';
 
 export default function Settings() {
   const { user, profile, refreshProfile, logout } = useAuthStore();
@@ -15,6 +16,20 @@ export default function Settings() {
   const [busy, setBusy] = useState(false);
 
   if (!profile) return <Navigate to="/login" replace />;
+
+  const isDiscordUser = user?.app_metadata?.provider === 'discord' || user?.app_metadata?.providers?.includes('discord');
+
+  async function resetPassword() {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+        redirectTo: `${window.location.origin}/settings`,
+      });
+      if (error) throw error;
+      addToast('PASSWORD RESET EMAIL SENT');
+    } catch (error) {
+      addToast(error.message || 'RESET FAILED', 'error');
+    }
+  }
 
   async function saveProfile(event) {
     event.preventDefault();
@@ -72,7 +87,7 @@ export default function Settings() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-[110px_1fr]">
-          {profile.avatar_url ? <img loading="lazy" className="h-24 w-24 rounded-lg border border-rdb-border object-cover" src={profile.avatar_url} alt="" /> : <div className="h-24 w-24 rounded-lg border border-rdb-border bg-rdb-surface" />}
+          <img loading="lazy" className="h-24 w-24 rounded-lg border border-rdb-border object-cover" src={getAvatarUrl(profile)} alt="" />
           <div>
             <label className="font-mono text-[11px] uppercase text-rdb-muted" htmlFor="avatar">Profile picture</label>
             <input id="avatar" className="rdb-input mt-2" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => setFile(event.target.files?.[0] || null)} />
@@ -90,11 +105,20 @@ export default function Settings() {
           <button className="rdb-button rdb-button-primary" disabled={busy} type="submit">{busy ? 'Saving...' : 'Save Settings'}</button>
         </div>
 
-        <div className="border-t border-rdb-border pt-4">
-          <button className="rdb-button w-full" type="button" onClick={syncDiscordBanner}>SYNC DISCORD PROFILE</button>
-          <p className="mt-2 font-mono text-[10px] uppercase text-rdb-muted text-center">Pull banner, avatar, and username from Discord</p>
-          <p className="mt-1 font-mono text-[10px] uppercase text-rdb-orange text-center">If not working, logout and login again first</p>
-        </div>
+        {isDiscordUser && (
+          <div className="border-t border-rdb-border pt-4">
+            <button className="rdb-button w-full" type="button" onClick={syncDiscordBanner}>SYNC DISCORD PROFILE</button>
+            <p className="mt-2 font-mono text-[10px] uppercase text-rdb-muted text-center">Pull banner, avatar, and username from Discord</p>
+            <p className="mt-1 font-mono text-[10px] uppercase text-rdb-orange text-center">If not working, logout and login again first</p>
+          </div>
+        )}
+
+        {!isDiscordUser && (
+          <div className="border-t border-rdb-border pt-4">
+            <button className="rdb-button w-full" type="button" onClick={resetPassword}>RESET PASSWORD</button>
+            <p className="mt-2 font-mono text-[10px] uppercase text-rdb-muted text-center">Send a reset link to {user.email}</p>
+          </div>
+        )}
       </form>
     </main>
   );

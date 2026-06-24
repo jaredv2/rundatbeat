@@ -1,22 +1,19 @@
 import { useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { LogOut, Menu, Settings, Shirt, User, X } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { playUiSound } from '../../lib/sfx';
-import { getNameCosmeticClassName, getNameGradientStyle } from '../../lib/display';
+import { getNameCosmeticClassName, getNameGradientStyle, getAvatarUrl } from '../../lib/display';
 import TokenBadge from '../tokens/TokenBadge';
 import NotificationBell from '../notifications/NotificationBell';
 
 function LoginButton() {
-  const login = async () => {
+  const navigate = useNavigate();
+  const login = () => {
     playUiSound('click');
-    await supabase?.auth.signInWithOAuth({
-      provider: 'discord',
-      options: { redirectTo: window.location.origin, scopes: 'identify' },
-    });
+    navigate('/login');
   };
-  return <button className="rdb-button bg-rdb-discord border-rdb-discord text-white" onClick={login}>Connect with Discord</button>;
+  return <button className="rdb-button rdb-button-primary" onClick={login}>LOGIN TO GET STARTED</button>;
 }
 
 export default function Navbar() {
@@ -54,7 +51,7 @@ export default function Navbar() {
               <Link className={`font-mono text-xs uppercase hover:text-rdb-orange ${getNameCosmeticClassName(profile)}`} style={getNameGradientStyle(profile)} to={`/profile/${profile.id}`}>
                 <User className="inline-block align-[-2px]" size={14} /> {profile.username}
               </Link>
-              {profile.avatar_url && <img loading="lazy" className="h-6 w-6 rounded border border-rdb-border object-cover" src={profile.avatar_url} alt="" />}
+              <img loading="lazy" className="h-6 w-6 rounded border border-rdb-border object-cover" src={getAvatarUrl(profile)} alt="" />
               <Link className="rdb-button" to="/cosmetics"><Shirt size={14} />Cosmetics</Link>
               <Link className="rdb-button" to="/settings"><Settings size={14} />Settings</Link>
               <button className="rdb-button" type="button" onClick={signOut}><LogOut size={14} />Logout</button>

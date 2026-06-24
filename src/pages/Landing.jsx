@@ -1,10 +1,8 @@
-import { supabase } from '../lib/supabase';
-
-function connectDiscord() {
-  return supabase?.auth.signInWithOAuth({ provider: 'discord', options: { redirectTo: window.location.origin, scopes: 'identify' } });
-}
+import { useNavigate } from 'react-router-dom';
 
 export default function Landing() {
+  const navigate = useNavigate();
+
   return (
     <main className="grid min-h-[calc(100vh-88px)] place-items-center px-4 py-12 text-center">
       <section className="mx-auto flex w-full max-w-3xl flex-col items-center">
@@ -13,7 +11,7 @@ export default function Landing() {
           <span className="font-mono text-[clamp(3.5rem,10vw,7rem)] font-bold uppercase leading-none text-rdb-text">SAMPLE BATTLE</span>
         </h1>
         <p className="mt-4 max-w-xl font-mono text-[13px] uppercase text-rdb-muted">Get a sample. Follow the prompt. Grind your way to the top.</p>
-        <button className="rdb-button rdb-button-primary mt-8" type="button" onClick={connectDiscord}>Connect With Discord</button>
+        <button className="rdb-button rdb-button-primary mt-8" type="button" onClick={() => navigate('/login')}>LOGIN TO GET STARTED</button>
       </section>
     </main>
   );
