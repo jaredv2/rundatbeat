@@ -62,6 +62,8 @@ export default function Settings() {
   }
 
   async function syncDiscordBanner() {
+    if (syncing) return;
+    setSyncing(true);
     try {
       const discord = await fetchDiscordProfile();
       if (!discord) throw new Error('Could not connect to Discord');
@@ -73,6 +75,8 @@ export default function Settings() {
       addToast('DISCORD PROFILE SYNCED');
     } catch (error) {
       addToast(error.message || 'SYNC FAILED', 'error');
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -108,7 +112,7 @@ export default function Settings() {
 
         {isDiscordUser && (
           <div className="border-t border-rdb-border pt-4">
-            <button className="rdb-button w-full" type="button" onClick={syncDiscordBanner}>SYNC DISCORD PROFILE</button>
+            <button className="rdb-button w-full" type="button" disabled={syncing} onClick={syncDiscordBanner}>{syncing ? 'SYNCING...' : 'SYNC DISCORD PROFILE'}</button>
             <p className="mt-2 font-mono text-[10px] uppercase text-rdb-muted text-center">Pull banner, avatar, and username from Discord</p>
             <p className="mt-1 font-mono text-[10px] uppercase text-rdb-orange text-center">If not working, logout and login again first</p>
           </div>
