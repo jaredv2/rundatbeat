@@ -14,6 +14,7 @@ export default function Settings() {
   const [description, setDescription] = useState(profile?.description || '');
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   if (!profile) return <Navigate to="/login" replace />;
 
