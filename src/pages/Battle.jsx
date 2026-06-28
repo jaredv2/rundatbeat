@@ -564,8 +564,9 @@ export default function Battle() {
               await new Promise(r => setTimeout(r, 800));
               return fetchXpWithRetry(attempts + 1);
             }
-            const oldLevel = profile.level || 1;
-            const newLevel = data?.level || 1;
+            const { levelFromXp } = await import('../lib/xp');
+            const oldLevel = levelFromXp(oldXpRef.current);
+            const newLevel = levelFromXp(newXpVal);
             setRankUpXpGain(gain || 5);
             setRankUpOldXp(oldXpRef.current);
             setRankUpNewXp(newXpVal);
