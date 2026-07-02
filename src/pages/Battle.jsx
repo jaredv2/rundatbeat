@@ -91,8 +91,8 @@ function SoloTimer({ target }) {
   );
 }
 
-function GetReadyCard({ onDone }) {
-  const [secs, setSecs] = useState(5);
+function GetReadyCard({ onDone, seconds = GET_READY_MS / 1000 }) {
+  const [secs, setSecs] = useState(seconds);
   const doneRef = useRef(false);
   useEffect(() => {
     if (secs <= 0 && !doneRef.current) {
@@ -115,6 +115,9 @@ function GetReadyCard({ onDone }) {
     </div>
   );
 }
+
+const CHALLENGE_REVEAL_MS = 5_000;
+const GET_READY_MS = 5_000;
 
 function SoloInstructionsCard({ challenge }) {
   if (!challenge) return null;
@@ -232,6 +235,12 @@ export default function Battle() {
   const [getReadyDone, setGetReadyDone] = useState(false);
   const [skipVoteActive, setSkipVoteActive] = useState(false);
   const [skipVoteDone, setSkipVoteDone] = useState(false);
+  const autoRerollTriggered = useRef(false);
+
+  // Reset reroll guard when challenge changes (new sample loaded)
+  useEffect(() => {
+    autoRerollTriggered.current = false;
+  }, [room?.challenge?.youtube_video_id]);
   const chatEndRef = useRef(null);
   const seenMsgIds = useRef(new Set());
   const selfLeaving = useRef(false);
@@ -887,7 +896,30 @@ export default function Battle() {
           <div className="grid gap-3 md:grid-cols-[1fr_320px]">
             {/* ── Left: Sample card ── */}
             <div className="space-y-3">
-              <SampleCard challenge={room.challenge} phase={phase} room={room} hideDetails />
+              <SampleCard challenge={room.challenge} phase={phase} room={room} hideDetails onUnavailable={async () => {
+                if (autoRerollTriggered.current) return;
+                autoRerollTriggered.current = true;
+                playUiSound('phase_change');
+                addToast('SAMPLE UNAVAILABLE — REROLLING');
+                try {
+                  const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
+                  const data = await buildChallenge('trap');
+                  const sample = data.sample || data;
+                  const payload = buildSamplePayload(sample);
+                  payload.freeMode = true;
+                  payload.instructions = '';
+                  payload.restrictionsList = '';
+                  payload.instructionGenre = '';
+                  await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
+                  if (room.battle_id) {
+                    await supabase.from('battles').update({ bpm: sample.bpm }).eq('id', room.battle_id);
+                  }
+                } catch (err) {
+                  devError('[AutoReroll] solo failed:', err);
+                  addToast('REROLL FAILED', 'error');
+                  autoRerollTriggered.current = false;
+                }
+              }} />
               {isFreeMode && (
                 <button
                   className="rdb-button w-full"
@@ -1139,23 +1171,13 @@ export default function Battle() {
           {/* ── MIDDLE: main content ── */}
           <div className="space-y-4">
             {phase === 'upcoming' ? (
-              !challengeRevealed ? (
-                <ChallengeReveal
-                  challenge={room?.challenge}
-                  endsAt={phaseEndsAt ? new Date(phaseEndsAt).toISOString() : battle?.starts_at}
-                  countdownDuration={30}
-                  battleId={battle?.id}
-                  roomId={room?.id}
-                  roomMode={room?.mode}
-                  onRevealed={() => setChallengeRevealed(true)}
-                />
-              ) : useSkipVote && !skipVoteDone ? (
+              useSkipVote && !skipVoteDone ? (
                 <SkipVoteCard
                   roomId={room?.id}
                   members={members}
                   profile={profile}
                   challenge={room?.challenge}
-                  endsAt={battle?.starts_at ? new Date(new Date(battle.starts_at).getTime() - 5000).toISOString() : null}
+                  endsAt={battle?.starts_at ? new Date(new Date(battle.starts_at).getTime() - (CHALLENGE_REVEAL_MS + GET_READY_MS)).toISOString() : null}
                   onResult={async (skip) => {
                     if (skip) {
                       playUiSound('phase_change');
@@ -1172,7 +1194,7 @@ export default function Battle() {
                         if (room.battle_id) {
                           const now = new Date();
                           const currentStartsAt = battle?.starts_at ? new Date(battle.starts_at).getTime() : now.getTime();
-                          const newStartsAt = Math.max(currentStartsAt, now.getTime()) + 25_000;
+                          const newStartsAt = Math.max(currentStartsAt, now.getTime()) + 15_000;
                           await supabase.from('battles').update({
                             starts_at: new Date(newStartsAt).toISOString(),
                             voting_ends_at: new Date(newStartsAt + (room.challenge?.battleMinutes || 30) * 60_000).toISOString(),
@@ -1190,6 +1212,16 @@ export default function Battle() {
                     }
                   }}
                 />
+              ) : !challengeRevealed ? (
+                <ChallengeReveal
+                  challenge={room?.challenge}
+                  endsAt={null}
+                  countdownDuration={CHALLENGE_REVEAL_MS / 1000}
+                  battleId={battle?.id}
+                  roomId={room?.id}
+                  roomMode={room?.mode}
+                  onRevealed={() => setChallengeRevealed(true)}
+                />
               ) : !getReadyDone ? (
                 <GetReadyCard onDone={() => setGetReadyDone(true)} />
               ) : (
@@ -1198,7 +1230,28 @@ export default function Battle() {
                 </div>
               )
             ) : phase === 'active' && room?.challenge ? (
-              <SampleCard challenge={room.challenge} phase={phase} room={room} />
+              <SampleCard challenge={room.challenge} phase={phase} room={room} onUnavailable={async () => {
+                if (autoRerollTriggered.current) return;
+                autoRerollTriggered.current = true;
+                playUiSound('phase_change');
+                addToast('SAMPLE UNAVAILABLE — REROLLING');
+                try {
+                  const { buildChallenge, buildSamplePayload } = await import('../lib/challengeService');
+                  const genre = room?.challenge?.instructionGenre || room?.challenge?.genre || 'trap';
+                  const data = await buildChallenge(genre);
+                  const sample = data.sample || data;
+                  const payload = buildSamplePayload(sample);
+                  if (room?.challenge?.freeMode) { payload.freeMode = true; payload.instructions = ''; payload.restrictionsList = ''; payload.instructionGenre = ''; }
+                  await supabase.from('rooms').update({ challenge: payload }).eq('id', room.id);
+                  if (room.battle_id) {
+                    await supabase.from('battles').update({ bpm: sample.bpm }).eq('id', room.battle_id);
+                  }
+                } catch (err) {
+                  devError('[AutoReroll] failed:', err);
+                  addToast('REROLL FAILED', 'error');
+                  autoRerollTriggered.current = false;
+                }
+              }} />
             ) : isVotingPhase && !calculatingWinner ? (
               <div id="voting-feed">
                 <VotingFeed

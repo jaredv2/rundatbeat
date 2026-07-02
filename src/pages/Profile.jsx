@@ -37,11 +37,10 @@ export default function Profile() {
   if (!profile) return <main className="rdb-container font-mono text-rdb-orange blink">LOADING...</main>;
 
   const isOwnProfile = viewer?.id === profile.id;
-  const winRate = profile.battles_entered ? Math.round((profile.wins / profile.battles_entered) * 100) : 0;
-  const rankedWins = profile.ranked_wins || 0;
-  const rankedLosses = profile.ranked_losses || 0;
-  const rankedPlayed = rankedWins + rankedLosses;
-  const rankedRate = rankedPlayed ? Math.round((rankedWins / rankedPlayed) * 100) : 0;
+  const totalWins = profile.wins || 0;
+  const totalPlayed = profile.battles_entered || 0;
+  const totalLosses = Math.max(0, totalPlayed - totalWins);
+  const winRate = totalPlayed ? Math.round((totalWins / totalPlayed) * 100) : 0;
   const joined = profile.created_at ? new Date(profile.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'UNKNOWN';
 
   const level = profile.level || 1;
@@ -129,9 +128,9 @@ export default function Profile() {
         <div className="rdb-panel p-4" style={{ borderColor: 'var(--profile-accent)' }}>
           <div className="grid grid-cols-4 gap-3 text-center">
             <StatBlock value={profile.elo || 1000} label="ELO" />
-            <StatBlock value={rankedWins} label="WINS" />
-            <StatBlock value={rankedLosses} label="LOSSES" />
-            <StatBlock value={rankedRate} label="WIN RATE" suffix="%" />
+            <StatBlock value={totalWins} label="WINS" />
+            <StatBlock value={totalLosses} label="LOSSES" />
+            <StatBlock value={winRate} label="WIN RATE" suffix="%" />
           </div>
         </div>
 

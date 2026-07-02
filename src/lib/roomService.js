@@ -87,7 +87,7 @@ export async function advanceLobbyToActive(roomId) {
     .eq('room_id', roomId);
 
   const isSolo = room?.mode === 'solo';
-  const revealPrepMs = isSolo ? 0 : 15_000; // 5s challenge reveal + 10s get-ready countdown (multiplayer only)
+  const revealPrepMs = isSolo ? 0 : 15_000; // 5s sample vote + 5s challenge reveal + 5s get-ready countdown (multiplayer only)
   const starts = new Date(Date.now() + revealPrepMs);
   const duration = room?.challenge?.battleMinutes || 15;
   const songLength = room?.song_length_seconds || 60;

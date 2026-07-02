@@ -543,10 +543,18 @@ async function advanceToClosed(battleId, roomId) {
         .eq('room_id', roomId);
       const userIds = (soloMembers || []).map(m => m.user_id);
       for (const userId of userIds) {
-        await supabase.rpc('record_battle_result', {
+        const { error: rpcErr } = await supabase.rpc('record_battle_result', {
           p_user_id: userId,
           p_is_winner: true,
         });
+        if (rpcErr) {
+          // Fallback: direct update (only works for own profile via RLS)
+          const { data: prof } = await supabase.from('profiles').select('wins, battles_entered').eq('id', userId).maybeSingle();
+          await supabase.from('profiles').update({
+            wins: (prof?.wins || 0) + 1,
+            battles_entered: (prof?.battles_entered || 0) + 1,
+          }).eq('id', userId);
+        }
       }
       log('SOLO WIN', userIds.map(id => id.slice(0, 8)));
     } catch (err) {
@@ -568,10 +576,18 @@ async function advanceToClosed(battleId, roomId) {
         await supabase.from('battles').update({ winner_id: winnerUserId }).eq('id', battleId).is('winner_id', null);
         const allUserIds = [...new Set(roomSubs.map(s => s.user_id))];
         for (const userId of allUserIds) {
-          await supabase.rpc('record_battle_result', {
+          const { error: rpcErr } = await supabase.rpc('record_battle_result', {
             p_user_id: userId,
             p_is_winner: userId === winnerUserId,
           });
+          if (rpcErr) {
+            // Fallback: direct update (only works for own profile via RLS)
+            const { data: prof } = await supabase.from('profiles').select('wins, battles_entered').eq('id', userId).maybeSingle();
+            await supabase.from('profiles').update({
+              wins: (prof?.wins || 0) + (userId === winnerUserId ? 1 : 0),
+              battles_entered: (prof?.battles_entered || 0) + 1,
+            }).eq('id', userId);
+          }
         }
         log('ROOM WIN', 'winner:', winnerUserId.slice(0, 8), '| players:', allUserIds.length);
       }

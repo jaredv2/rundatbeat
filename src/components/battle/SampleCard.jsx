@@ -1,7 +1,7 @@
 import { ClipboardCopy, ExternalLink, Music } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-export default function SampleCard({ challenge, phase, room, hideDetails }) {
+export default function SampleCard({ challenge, phase, room, hideDetails, onUnavailable }) {
   const [copied, setCopied] = useState(false);
   const [ytAvailable, setYtAvailable] = useState(true);
   if (!challenge) return null;
@@ -10,8 +10,17 @@ export default function SampleCard({ challenge, phase, room, hideDetails }) {
     if (!challenge.youtube_video_id) return;
     let cancelled = false;
     fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${challenge.youtube_video_id}&format=json`)
-      .then((r) => { if (!cancelled) setYtAvailable(r.ok); })
-      .catch(() => { if (!cancelled) setYtAvailable(false); });
+      .then((r) => {
+        if (cancelled) return;
+        const avail = r.ok;
+        setYtAvailable(avail);
+        if (!avail) onUnavailable?.();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setYtAvailable(false);
+        onUnavailable?.();
+      });
     return () => { cancelled = true; };
   }, [challenge.youtube_video_id]);
 

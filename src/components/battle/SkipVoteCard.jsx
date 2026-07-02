@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Music, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { useCountdown } from '../../hooks/useCountdown';
 import { supabase } from '../../lib/supabase';
@@ -9,8 +9,34 @@ export default function SkipVoteCard({ roomId, members, profile, challenge, ends
   const [myVote, setMyVote] = useState(null); // true = skip, false = keep
   const [skipCount, setSkipCount] = useState(0);
   const [keepCount, setKeepCount] = useState(0);
+  const [ytAvailable, setYtAvailable] = useState(true);
+  const autoSkippedRef = useRef(false);
   const totalPlayers = members?.length || 1;
   const majority = Math.ceil(totalPlayers / 2);
+
+  useEffect(() => {
+    if (!challenge?.youtube_video_id) return;
+    let cancelled = false;
+    fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${challenge.youtube_video_id}&format=json`)
+      .then((r) => {
+        if (cancelled) return;
+        const avail = r.ok;
+        setYtAvailable(avail);
+        if (!avail && !autoSkippedRef.current) {
+          autoSkippedRef.current = true;
+          onResult?.(true);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setYtAvailable(false);
+        if (!autoSkippedRef.current) {
+          autoSkippedRef.current = true;
+          onResult?.(true);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [challenge?.youtube_video_id]);
 
   useEffect(() => {
     if (!roomId || !supabase) return;
