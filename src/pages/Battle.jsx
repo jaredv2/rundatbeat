@@ -210,7 +210,7 @@ export default function Battle() {
   const soloDifficulty = searchParams.get('difficulty') || 'medium';
 
   // useBattle is fully realtime — no polling anywhere below
-  const { battle, submissions, room, members, messages, loading, refresh, refreshRoomData, refreshSubmissions } =
+  const { battle, submissions, room, members, messages, loading, refresh, refreshRoomData, refreshSubmissions, optimisticMessage, optimisticRemoveMessage, optimisticConfirmMessage } =
     useBattle(id);
 
   const [ratings, setRatings]       = useState({});
@@ -643,15 +643,39 @@ export default function Battle() {
     lastChatSentAt.current = now;
     playUiSound('chat');
     const body = censorProfanity(messageBody.trim().slice(0, 500));
+    const tempId = `local-${profile.id}-${now}`;
+    const optimistic = {
+      id: tempId,
+      room_id: room.id,
+      user_id: profile.id,
+      body,
+      created_at: new Date(now).toISOString(),
+      profiles: {
+        username: profile.username,
+        active_theme: profile.active_theme,
+        accent_color: profile.accent_color,
+        active_name_color: profile.active_name_color,
+        active_name_effect: profile.active_name_effect,
+        nameplate_icon: profile.nameplate_icon,
+      },
+    };
+    optimisticMessage(optimistic);
     setMessageBody('');
     try {
       const { data: roomCheck } = await supabase.from('rooms').select('id').eq('id', room.id).maybeSingle();
-      if (!roomCheck) return;
-      const { error } = await supabase
+      if (!roomCheck) {
+        optimisticRemoveMessage(tempId);
+        return;
+      }
+      const { data, error } = await supabase
         .from('room_messages')
-        .insert({ room_id: room.id, user_id: profile.id, body });
+        .insert({ room_id: room.id, user_id: profile.id, body })
+        .select('*, profiles(username, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon)')
+        .single();
       if (error) throw error;
+      optimisticConfirmMessage(tempId, data);
     } catch (err) {
+      optimisticRemoveMessage(tempId);
       addToast(err.message || 'MESSAGE FAILED', 'error');
     }
   }
@@ -1171,13 +1195,13 @@ export default function Battle() {
           {/* ── MIDDLE: main content ── */}
           <div className="space-y-4">
             {phase === 'upcoming' ? (
-              useSkipVote && !skipVoteDone ? (
+              useSkipVote && !skipVoteDone && room?.challenge ? (
                 <SkipVoteCard
                   roomId={room?.id}
                   members={members}
                   profile={profile}
                   challenge={room?.challenge}
-                  endsAt={battle?.starts_at ? new Date(new Date(battle.starts_at).getTime() - (CHALLENGE_REVEAL_MS + GET_READY_MS)).toISOString() : null}
+                  endsAt={battle?.starts_at ? new Date(new Date(battle.starts_at).getTime() - CHALLENGE_REVEAL_MS).toISOString() : null}
                   onResult={async (skip) => {
                     if (skip) {
                       playUiSound('phase_change');
@@ -1194,7 +1218,7 @@ export default function Battle() {
                         if (room.battle_id) {
                           const now = new Date();
                           const currentStartsAt = battle?.starts_at ? new Date(battle.starts_at).getTime() : now.getTime();
-                          const newStartsAt = Math.max(currentStartsAt, now.getTime()) + 15_000;
+                          const newStartsAt = Math.max(currentStartsAt, now.getTime()) + 10_000;
                           await supabase.from('battles').update({
                             starts_at: new Date(newStartsAt).toISOString(),
                             voting_ends_at: new Date(newStartsAt + (room.challenge?.battleMinutes || 30) * 60_000).toISOString(),
@@ -1212,6 +1236,10 @@ export default function Battle() {
                     }
                   }}
                 />
+              ) : useSkipVote && !skipVoteDone ? (
+                <div className="rdb-panel p-8 text-center space-y-4">
+                  <Spinner label="LOADING SAMPLE" />
+                </div>
               ) : !challengeRevealed ? (
                 <ChallengeReveal
                   challenge={room?.challenge}
@@ -1222,8 +1250,6 @@ export default function Battle() {
                   roomMode={room?.mode}
                   onRevealed={() => setChallengeRevealed(true)}
                 />
-              ) : !getReadyDone ? (
-                <GetReadyCard onDone={() => setGetReadyDone(true)} />
               ) : (
                 <div className="rdb-panel p-8 text-center space-y-4">
                   <Spinner label="STARTING BATTLE" />
@@ -1520,9 +1546,43 @@ export default function Battle() {
                     disabled={!room}
                     onClick={async () => {
                       if (!profile || !room) return;
+                      const now = Date.now();
+                      if (now - lastChatSentAt.current < 1000) return;
+                      lastChatSentAt.current = now;
+                      playUiSound('chat');
+                      const tempId = `local-${profile.id}-${now}`;
+                      const optimistic = {
+                        id: tempId,
+                        room_id: room.id,
+                        user_id: profile.id,
+                        body: emoji,
+                        created_at: new Date(now).toISOString(),
+                        profiles: {
+                          username: profile.username,
+                          active_theme: profile.active_theme,
+                          accent_color: profile.accent_color,
+                          active_name_color: profile.active_name_color,
+                          active_name_effect: profile.active_name_effect,
+                          nameplate_icon: profile.nameplate_icon,
+                        },
+                      };
+                      optimisticMessage(optimistic);
                       const { data: roomCheck } = await supabase.from('rooms').select('id').eq('id', room.id).maybeSingle();
-                      if (!roomCheck) return;
-                      await supabase.from('room_messages').insert({ room_id: room.id, user_id: profile.id, body: emoji });
+                      if (!roomCheck) {
+                        optimisticRemoveMessage(tempId);
+                        return;
+                      }
+                      const { data, error } = await supabase
+                        .from('room_messages')
+                        .insert({ room_id: room.id, user_id: profile.id, body: emoji })
+                        .select('*, profiles(username, active_theme, accent_color, active_name_color, active_name_effect, nameplate_icon)')
+                        .single();
+                      if (error) {
+                        optimisticRemoveMessage(tempId);
+                        addToast(error.message || 'MESSAGE FAILED', 'error');
+                        return;
+                      }
+                      optimisticConfirmMessage(tempId, data);
                     }}
                   >
                     {emoji}

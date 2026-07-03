@@ -1,11 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Music, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { useCountdown } from '../../hooks/useCountdown';
 import { supabase } from '../../lib/supabase';
 import { playUiSound } from '../../lib/sfx';
 
 export default function SkipVoteCard({ roomId, members, profile, challenge, endsAt, onResult }) {
-  const { remaining } = useCountdown(endsAt);
+  const effectiveEndsAt = useMemo(() => {
+    const now = Date.now();
+    if (endsAt) {
+      const parsed = new Date(endsAt).getTime();
+      if (parsed > now + 500) return endsAt;
+    }
+    return new Date(now + 30000).toISOString();
+  }, [challenge?.youtube_video_id, challenge?.genre, endsAt]);
+  const { remaining } = useCountdown(effectiveEndsAt);
   const [myVote, setMyVote] = useState(null); // true = skip, false = keep
   const [skipCount, setSkipCount] = useState(0);
   const [keepCount, setKeepCount] = useState(0);
@@ -81,6 +89,7 @@ export default function SkipVoteCard({ roomId, members, profile, challenge, ends
   }
 
   useEffect(() => {
+    if (!challenge) return;
     if (remaining !== null && remaining <= 0) {
       const totalVoted = skipCount + keepCount;
       if (totalPlayers <= 3 && totalVoted >= totalPlayers && skipCount === totalPlayers) {
@@ -89,7 +98,7 @@ export default function SkipVoteCard({ roomId, members, profile, challenge, ends
         onResult?.(false);
       }
     }
-  }, [remaining]);
+  }, [remaining, challenge, skipCount, keepCount, totalPlayers]);
 
   return (
     <div className="rdb-panel p-6 space-y-4">

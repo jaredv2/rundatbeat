@@ -87,10 +87,10 @@ export async function advanceLobbyToActive(roomId) {
     .eq('room_id', roomId);
 
   const isSolo = room?.mode === 'solo';
-  const revealPrepMs = isSolo ? 0 : 15_000; // 5s sample vote + 5s challenge reveal + 5s get-ready countdown (multiplayer only)
-  const starts = new Date(Date.now() + revealPrepMs);
+  const revealPrepMs = isSolo ? 0 : 35_000; // 30s sample vote + 5s challenge reveal (multiplayer only)
   const duration = room?.challenge?.battleMinutes || 15;
   const songLength = room?.song_length_seconds || 60;
+  const starts = new Date(Date.now() + revealPrepMs);
   const votingEnds = new Date(starts.getTime() + duration * 60 * 1000);
   log('LOBBY→ACTIVE', 'players:', playerCount, 'duration:', duration + 'min', 'starts:', starts.toISOString());
 
@@ -164,6 +164,21 @@ export async function advanceLobbyToActive(roomId) {
       } else {
         log('LOBBY→ACTIVE', 'skipped challenge generation — not owner');
       }
+    }
+
+    // Recalculate starts_at so skip vote + challenge reveal have their full
+    // allotted time windows regardless of how long challenge generation took.
+    // This runs on the race-lock winner (the only client that reaches here)
+    // and the update propagates to all clients via realtime.
+    if (!isSolo) {
+      const now = Date.now();
+      const adjustedStartsAt = new Date(now + revealPrepMs).toISOString();
+      const adjustedVotingEnds = new Date(now + revealPrepMs + duration * 60 * 1000).toISOString();
+      await supabase
+        .from('battles')
+        .update({ starts_at: adjustedStartsAt, voting_ends_at: adjustedVotingEnds })
+        .eq('id', battle.id);
+      log('LOBBY→ACTIVE', 'starts_at adjusted to', adjustedStartsAt);
     }
 
     return { battleId: battle.id };

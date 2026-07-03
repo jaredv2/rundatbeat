@@ -278,6 +278,18 @@ export function useBattle(id) {
     setMessages(prev => prev.filter(m => m.id !== tempId));
   }
 
+  /** Replace a local-only chat message with the saved row, or merge if realtime already added it. */
+  function optimisticConfirmMessage(tempId, savedMsg) {
+    setMessages(prev => {
+      const withoutTemp = prev.filter(m => m.id !== tempId);
+      if (!savedMsg) return withoutTemp;
+      if (withoutTemp.some(m => m.id === savedMsg.id)) {
+        return withoutTemp.map(m => m.id === savedMsg.id ? mergeObj(m, savedMsg) : m);
+      }
+      return [...withoutTemp, savedMsg];
+    });
+  }
+
   /** Optimistically merge battle fields. */
   function optimisticBattle(patch) {
     setBattle(prev => ({ ...prev, ...patch }));
@@ -399,6 +411,11 @@ export function useBattle(id) {
             const msg = payload.new;
             setMessages(prev => {
               if (prev.some(m => m.id === msg.id)) return prev;
+              // Skip adding a realtime duplicate if this message was already
+              // added optimistically by the sender — prevents "USER" flicker
+              if (msg.user_id && msg.body && prev.some(m =>
+                typeof m.id === 'string' && m.id.startsWith('local-') && m.user_id === msg.user_id && m.body === msg.body
+              )) return prev;
               return [...prev, msg];
             });
             supabase
@@ -456,6 +473,7 @@ export function useBattle(id) {
     optimisticVotingStopped,
     optimisticMessage,
     optimisticRemoveMessage,
+    optimisticConfirmMessage,
     optimisticBattle,
     optimisticRoom,
   }), [battle, submissions, room, members, messages, loading]);
